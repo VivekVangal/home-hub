@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "home-hub-family"
+    "default": "home-hub-family",
+    "prod": "home-hub-family",
+    "dev": "home-hub-family-dev"
   }
 }

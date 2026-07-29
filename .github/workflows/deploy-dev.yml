@@ -1,12 +1,18 @@
-name: Deploy Home Hub
+name: Deploy Home Hub (development)
+
+# Same pipeline as production, but targets the separate home-hub-family-dev
+# Firebase project via the "development" GitHub Environment's secrets, so
+# testing on this branch never touches real family data. Push feature work
+# to `develop` to get a live preview here before merging to `main`.
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
 
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    environment: development
     steps:
       - uses: actions/checkout@v4
 

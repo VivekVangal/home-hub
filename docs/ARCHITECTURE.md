@@ -18,7 +18,11 @@ Home Hub has no custom backend server. The React app (built with Vite) talks dir
 
 **Firebase Hosting** — serves the built static app (`frontend/dist`) at `https://home-hub-family.web.app`. Just a CDN for the compiled bundle; no server-side logic runs here.
 
-**GitHub Actions** (`.github/workflows/deploy.yml`) — on every push to `main`: checks out the repo, installs dependencies, runs the test suite, builds the app, deploys the build to Firebase Hosting, and deploys `firestore.rules`/`firestore.indexes.json`. This is the only path that changes what's live — nobody deploys by hand.
+**GitHub Actions** — two workflows, one per environment. `.github/workflows/deploy-prod.yml` runs on every push to `main`: checks out the repo, installs dependencies, runs the test suite, builds the app, deploys to Firebase Hosting, and deploys `firestore.rules`/`firestore.indexes.json` — all against the production project (`home-hub-family`). `.github/workflows/deploy-dev.yml` runs the identical pipeline on pushes to `develop`, but against a wholly separate Firebase project (`home-hub-family-dev`) via GitHub Environment-scoped secrets. Nobody deploys by hand either way.
+
+## Environments
+
+Production and development are two independent Firebase projects — separate Auth users, separate Firestore, separate everything — not two collections in one project. This is deliberate: it means local development (`npm run dev`, pointed at the dev project via `frontend/.env.local`) and in-progress feature branches can never read or write real family data, and a bug in a dev-only code path can't corrupt production. See `scripts/setup-dev-env.sh` and README.md's "Environments" section for setup.
 
 ## Data model
 
