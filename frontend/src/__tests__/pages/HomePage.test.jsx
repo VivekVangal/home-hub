@@ -38,7 +38,7 @@ describe('HomePage dashboard', () => {
     expect(await screen.findByText('Milk')).toBeInTheDocument()
     expect(screen.queryByText('Already got it')).not.toBeInTheDocument()
     expect(await screen.findByText('Overdue filter change')).toBeInTheDocument()
-    expect(screen.getByText(/Overdue/)).toBeInTheDocument()
+    expect(screen.getByText(/Overdue ·/)).toBeInTheDocument()
   })
 
   test('links out to the calendar, groceries, and tasks pages', async () => {

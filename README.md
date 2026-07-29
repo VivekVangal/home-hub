@@ -57,9 +57,30 @@ If you'd rather not run a script, or want to understand what it's doing:
 10. **Add GitHub repo secrets** (repo Settings → Secrets and variables → Actions → New repository secret):
     - `FIREBASE_SERVICE_ACCOUNT` — paste the entire contents of the JSON key file from step 9.
     - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` — same 6 values from `.env.local`.
-11. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds, deploys the frontend to Firebase Hosting, and deploys `firestore.rules`/`firestore.indexes.json` — every push to `main` from then on auto-deploys.
+11. **Push to `main`.** `.github/workflows/deploy-prod.yml` runs the tests, builds, deploys the frontend to Firebase Hosting, and deploys `firestore.rules`/`firestore.indexes.json` — every push to `main` from then on auto-deploys to production. See "Environments" below for setting up the separate dev project/pipeline.
 
 Either way, your live URL will be `https://<your-project-id>.web.app`.
+
+## Environments — dev and production are separate Firebase projects
+
+**Production** (`home-hub-family`) is what real family data lives in and what `https://home-hub-family.web.app` serves. **Development** (`home-hub-family-dev`) is a second, independent Firebase project — separate Auth users, separate Firestore, separate everything — that exists purely so local testing and in-progress features never touch real data.
+
+Set it up once with:
+
+```bash
+cd home-hub
+chmod +x scripts/setup-dev-env.sh
+./scripts/setup-dev-env.sh
+```
+
+This creates the `home-hub-family-dev` project, walks you through enabling Auth providers on it, and sets up a `development` GitHub Environment with its own secrets. After that:
+
+- **`frontend/.env.local`** (used by `npm run dev` locally) should always hold the **dev** project's config values — never production's.
+- **Pushing to `develop`** deploys to the dev project via `.github/workflows/deploy-dev.yml`, giving you a live URL (`https://home-hub-family-dev.web.app`) to test against before anything reaches real users.
+- **Pushing to `main`** deploys to production via `.github/workflows/deploy-prod.yml`, unchanged from before.
+- **`.firebaserc`** has both project aliases (`dev`, `prod`) — e.g. `firebase deploy --project dev` from your terminal targets the dev project explicitly.
+
+Regular deploys (hosting or Firestore rules/indexes) never delete Firestore documents on their own — if data ever seemed to disappear after a deploy, the likely cause was local testing running against the same project as production, which this split eliminates going forward.
 
 ## Run it locally
 
@@ -68,6 +89,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Make sure `frontend/.env.local` points at the **dev** Firebase project (see "Environments" above) before doing this — otherwise you're testing against real family data.
 
 Open http://localhost:5173, sign up, create a family, and share the invite code with whoever else should join (they sign up separately and enter the code).
 
@@ -101,13 +124,18 @@ families/{familyId}/events/{eventId}   — { title, date, startTime, endTime, ow
 families/{familyId}/tasks/{taskId}     — { type, title, category, dueDate, owner, recurrence, done, notes, createdAt }
 families/{familyId}/groceries/{itemId} — { name, quantity, category, checked, addedBy, weekStart, createdAt }
 users/{uid}                            — { uid, email, familyId }  (maps a signed-in user to their family)
+inviteCodes/{code}                     — { familyId }  (nothing else — see below)
 ```
 
-`owner` (and `addedBy`) is either a specific member's `uid` or the synthetic `"all"` value for anything shared with the whole family — that's what the Combined/individual filter checks. Security rules (`firestore.rules`) only let a signed-in user read/write a family's data if they have a `members/{their-uid}` doc in that family.
+`owner` (and `addedBy`) is either a specific member's `uid` or the synthetic `"all"` value for anything shared with the whole family — that's what the Combined/individual filter checks.
+
+**Privacy: families can't see each other at all.** `firestore.rules` only lets a signed-in user read/write a family's data — including just the family's *name* — if they have a `members/{their-uid}` doc in that family. Nobody can browse or discover other families, even other Home Hub users you've never met.
+
+The one wrinkle this creates: joining a family by invite code needs *some* way to look up a family from a code before you're a member of it — but a database query can't be restricted to "only if you already knew what you were looking for," only "can this signed-in user read documents matching this query" (Firestore rules see documents, not query intent). So instead of querying the `families` collection directly, `joinFamily()` looks up `inviteCodes/{code}` — a single get-by-exact-id, which the rules allow for any signed-in user (get, not list/query), because getting that specific document requires already knowing the 6-character code. That document holds nothing but a `familyId`; the real `families/{familyId}` doc — name, owner, everything else — stays members-only.
 
 `firestore.indexes.json` is intentionally empty — every query here uses either a single field or multiple equality (`==`) filters, which Firestore serves from its automatic indexes; sorting happens client-side in `db.js` instead of via `orderBy`, so no composite indexes are needed.
 
-See **[`GCP_PLAN.md`](./GCP_PLAN.md)** for the full design rationale, including the security rules sketch this was built from and what's intentionally deferred (Cloud Functions for invite-code lookups, push notifications, etc.).
+See **[`GCP_PLAN.md`](./GCP_PLAN.md)** for the full design rationale, including the security rules sketch this was built from and what's intentionally deferred (Cloud Functions for invite-code lookups, push notifications, etc.). See **[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)** for a diagram of how the pieces connect, plus a cost breakdown of running this on Firebase.
 
 ## Customizing
 

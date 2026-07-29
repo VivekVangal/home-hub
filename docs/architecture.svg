@@ -1,0 +1,87 @@
+<svg viewBox="0 0 980 640" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Home Hub architecture</title>
+<desc>React browser app talks to Firebase Auth and Firestore, gated by security rules; GitHub Actions builds and deploys on push to main.</desc>
+<style>
+  .box { fill: #ffffff; stroke: #d8d8d8; stroke-width: 1.5; }
+  .box-accent { fill: #eef2ff; stroke: #4f5bd5; stroke-width: 1.5; }
+  .box-muted { fill: #f7f7f7; stroke: #d8d8d8; stroke-width: 1.5; }
+  .title { font: 600 15px system-ui, sans-serif; fill: #1a1a1a; }
+  .sub { font: 400 12px system-ui, sans-serif; fill: #666666; }
+  .label { font: 500 11px system-ui, sans-serif; fill: #666666; }
+  .arrow { stroke: #9a9a9a; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .arrow-dashed { stroke: #9a9a9a; stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; marker-end: url(#arrow); }
+  .section { font: 600 12px system-ui, sans-serif; fill: #888888; letter-spacing: 0.04em; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#9a9a9a"/>
+  </marker>
+</defs>
+
+<rect width="980" height="640" fill="#ffffff"/>
+
+<!-- Client -->
+<text x="60" y="40" class="section">CLIENT</text>
+<rect x="50" y="55" width="220" height="90" rx="10" class="box-accent"/>
+<text x="70" y="90" class="title">React App (Vite)</text>
+<text x="70" y="110" class="sub">Browser, one per user</text>
+<text x="70" y="128" class="sub">Auth + Family context</text>
+
+<!-- Firebase group -->
+<text x="450" y="40" class="section">FIREBASE (home-hub-family)</text>
+<rect x="440" y="55" width="220" height="90" rx="10" class="box"/>
+<text x="460" y="90" class="title">Firebase Auth</text>
+<text x="460" y="110" class="sub">Email/password + Google</text>
+<text x="460" y="128" class="sub">Issues identity token</text>
+
+<rect x="440" y="170" width="220" height="100" rx="10" class="box"/>
+<text x="460" y="205" class="title">Firestore</text>
+<text x="460" y="225" class="sub">families / members / events</text>
+<text x="460" y="243" class="sub">tasks / groceries / inviteCodes</text>
+<text x="460" y="261" class="sub">Real-time via onSnapshot</text>
+
+<rect x="440" y="290" width="220" height="70" rx="10" class="box-muted"/>
+<text x="460" y="318" class="title">firestore.rules</text>
+<text x="460" y="336" class="sub">isMember(familyId) checks</text>
+
+<rect x="710" y="170" width="220" height="70" rx="10" class="box"/>
+<text x="730" y="198" class="title">Firebase Hosting</text>
+<text x="730" y="216" class="sub">Serves the built app</text>
+
+<!-- arrows client <-> firebase -->
+<path d="M270,80 L440,90" class="arrow"/>
+<text x="300" y="72" class="label">sign in / token</text>
+<path d="M270,110 L440,215" class="arrow"/>
+<text x="290" y="150" class="label">reads / writes (rule-checked)</text>
+<path d="M440,235 L270,120" class="arrow-dashed"/>
+<text x="300" y="245" class="label">live updates (dashed)</text>
+
+<!-- rules gate -->
+<path d="M550,270 L550,290" class="arrow"/>
+
+<!-- hosting to client -->
+<path d="M160,55 C160,10 800,10 800,170" class="arrow"/>
+<text x="440" y="15" class="label">serves static app bundle</text>
+
+<!-- CI/CD -->
+<text x="60" y="420" class="section">CI/CD</text>
+<rect x="50" y="435" width="200" height="70" rx="10" class="box-muted"/>
+<text x="70" y="463" class="title">GitHub repo</text>
+<text x="70" y="481" class="sub">push to main</text>
+
+<rect x="300" y="435" width="220" height="90" rx="10" class="box-muted"/>
+<text x="320" y="463" class="title">GitHub Actions</text>
+<text x="320" y="481" class="sub">test → build → deploy</text>
+<text x="320" y="499" class="sub">rules + hosting</text>
+
+<path d="M250,470 L300,478" class="arrow"/>
+<path d="M410,435 C410,380 660,340 660,290" class="arrow"/>
+<text x="440" y="400" class="label">deploys rules</text>
+<path d="M520,470 C650,470 800,350 820,270" class="arrow"/>
+<text x="620" y="530" class="label">deploys hosting bundle</text>
+
+<!-- footer note -->
+<rect x="50" y="560" width="880" height="60" rx="10" class="box-muted"/>
+<text x="70" y="583" class="sub">No custom backend server — the browser talks to Firebase directly. Security rules (not app code) are the only enforcement point for who can read/write what.</text>
+<text x="70" y="601" class="sub">Two unrelated families can never see each other's data, even family names — enforced at the rules layer via family membership + invite-code lookup.</text>
+</svg>

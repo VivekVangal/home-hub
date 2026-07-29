@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID"
+    "default": "home-hub-family",
+    "prod": "home-hub-family",
+    "dev": "home-hub-family-dev"
   }
 }

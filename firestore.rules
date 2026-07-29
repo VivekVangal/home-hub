@@ -16,15 +16,28 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
 
+    // Maps an invite code to nothing but a familyId — deliberately minimal.
+    // "get" (a direct read by exact document id) is allowed to any signed-in
+    // user, since you have to already know the 6-character code to ask for
+    // it — same trust model as an invite link. "list" (querying/enumerating
+    // the whole collection) is blocked, so there's no way to browse or guess
+    // your way through every code that exists. This indirection is what lets
+    // families/{familyId} below stay members-only: joinFamily() resolves a
+    // code through here instead of querying the families collection
+    // directly, which would've required exposing family names/owners to any
+    // signed-in user, including ones from unrelated families.
+    match /inviteCodes/{code} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
     match /families/{familyId} {
-      // Any signed-in user can read family metadata (name/ownerUid/inviteCode).
-      // This is intentionally broad: joinFamily() runs a query filtering by
-      // inviteCode, and Firestore rules can't restrict which documents a
-      // query is allowed to match — only whether the rule permits reading
-      // matched docs. The invite code itself is the actual secret here (like
-      // most invite-link systems); tightening this further would mean moving
-      // the code lookup into a Cloud Function instead of a client-side query.
-      allow read: if isSignedIn();
+      // Members-only. Nobody outside a family — not even another signed-in
+      // Home Hub user — can read its name, owner, or invite code unless
+      // they're already a member of it.
+      allow read: if isMember(familyId);
       allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
       allow update: if isMember(familyId);
       allow delete: if false;

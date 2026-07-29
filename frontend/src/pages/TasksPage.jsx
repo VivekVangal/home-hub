@@ -11,7 +11,13 @@ function TaskRow({ task, ownerById, onToggle, onClick }) {
   const owner = ownerById[task.owner] || ALL
   return (
     <div className="list-item">
-      <input type="checkbox" className="checkbox" checked={task.done} onChange={() => onToggle(task)} />
+      <input
+        type="checkbox"
+        className="checkbox"
+        checked={task.done}
+        onChange={() => onToggle(task)}
+        aria-label={`Mark "${task.title}" done`}
+      />
       <div className="list-item-main" onClick={() => onClick(task)} style={{ cursor: 'pointer' }}>
         <div className={'list-item-title' + (task.done ? ' strike' : '')}>{task.title}</div>
         <div className="list-item-sub">

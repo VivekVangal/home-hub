@@ -114,6 +114,8 @@ service cloud.firestore {
 
 (Firestore rules don't actually support a `where ... in [...]` shorthand across match blocks — that line is illustrative; the real rules file will have one explicit `match` block per collection, all with the same `isMember(familyId)` check.)
 
+**Post-implementation fix:** the first version of `firestore.rules` allowed any signed-in user to read `families/{familyId}` (name/owner/invite code), because `joinFamily()` originally queried the whole `families` collection by invite code, and rules can't restrict *which* documents a query matches — only whether matched documents are readable. That meant two unrelated families could technically see each other's names, which isn't acceptable. The fix: a new top-level `inviteCodes/{code} → { familyId }` collection, readable only by direct get-by-id (not list/query) — so resolving a code no longer requires broad read access to `families`. `families/{familyId}` is now members-only, full stop. See the actual `firestore.rules` and the "How the data model works" section in `README.md` for the current version.
+
 ## Migration steps (when you're ready to execute)
 
 1. **Create the Firebase project** (new project, per your earlier answer — not reusing `baby-vg`). Enable Firestore and Authentication (Email/Password provider) in the console.
