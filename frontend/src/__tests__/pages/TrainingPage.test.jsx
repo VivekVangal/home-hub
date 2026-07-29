@@ -1,11 +1,16 @@
 import { describe, test, expect } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 import TrainingPage from '../../pages/TrainingPage.jsx'
+import { saveTrainingProfile } from '../../db.js'
+import { setCallableHandler } from '../../test/mocks/functionsMock.js'
 import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
 
+// TrainingPage uses useNavigate() (to clean up the ?code=... query param
+// after a Strava OAuth redirect), which needs a Router context.
 function renderTraining() {
-  return render(<TrainingPage />, { wrapper: AllProviders })
+  return render(<MemoryRouter><TrainingPage /></MemoryRouter>, { wrapper: AllProviders })
 }
 
 describe('TrainingPage', () => {
@@ -76,5 +81,38 @@ describe('TrainingPage', () => {
 
     await user.click(screen.getByLabelText('Show completed'))
     expect(await screen.findByText('Buy new shoes')).toBeInTheDocument()
+  })
+
+  test('shows "Connect Strava" before connecting, and "Sync with Strava" once connected', async () => {
+    const { user: authUser } = await setupSignedInFamily()
+    renderTraining()
+    await screen.findByText('Build your training plan')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
+    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
+
+    const connectLink = screen.getByRole('link', { name: 'Connect Strava' })
+    expect(connectLink.getAttribute('href')).toMatch(/^https:\/\/www\.strava\.com\/oauth\/authorize\?/)
+
+    await saveTrainingProfile(authUser.uid, { stravaConnected: true })
+    expect(await screen.findByRole('button', { name: 'Sync with Strava' })).toBeInTheDocument()
+  })
+
+  test('"Sync with Strava" calls the sync function and shows a status message', async () => {
+    const { user: authUser } = await setupSignedInFamily()
+    renderTraining()
+    await screen.findByText('Build your training plan')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
+    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
+    await saveTrainingProfile(authUser.uid, { stravaConnected: true })
+    await screen.findByRole('button', { name: 'Sync with Strava' })
+
+    setCallableHandler('stravaSync', () => ({ matchedCount: 2, activityCount: 3 }))
+    await user.click(screen.getByRole('button', { name: 'Sync with Strava' }))
+
+    expect(await screen.findByText('Synced — 2 runs matched.')).toBeInTheDocument()
   })
 })

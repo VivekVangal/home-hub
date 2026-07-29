@@ -78,6 +78,14 @@ service cloud.firestore {
       match /trainingProfiles/{uid} {
         allow read, write: if isSignedIn() && request.auth.uid == uid;
       }
+
+      // Strava OAuth tokens. Never read or written by the client directly —
+      // only Cloud Functions (Admin SDK, which bypasses these rules) touch
+      // this. The client only ever sees the derived
+      // trainingProfiles/{uid}.stravaConnected boolean.
+      match /stravaTokens/{uid} {
+        allow read, write: if false;
+      }
     }
   }
 }

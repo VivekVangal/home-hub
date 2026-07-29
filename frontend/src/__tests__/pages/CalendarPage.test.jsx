@@ -73,4 +73,34 @@ describe('CalendarPage — individual vs combined views', () => {
     await user.click(screen.getAllByRole('button', { name: 'Person 2' })[0])
     expect(await screen.findByText('Family dinner')).toBeInTheDocument()
   })
+
+  test('Day view (reached by clicking a day header) shows only that day\'s events', async () => {
+    const user = userEvent.setup()
+    const { container } = renderCalendar()
+    await screen.findByRole('button', { name: 'Combined' })
+
+    // Add one event on each of the week's first two days via each day
+    // column's own "+" button.
+    const dayAddButtons = await screen.findAllByRole('button', { name: '+' })
+    await user.click(dayAddButtons[0])
+    await user.type(screen.getByPlaceholderText('Dentist appointment'), 'Monday event')
+    await user.click(screen.getByRole('button', { name: 'Add event' }))
+    await screen.findByText('Monday event')
+
+    await user.click(screen.getAllByRole('button', { name: '+' })[1])
+    await user.type(screen.getByPlaceholderText('Dentist appointment'), 'Tuesday event')
+    await user.click(screen.getByRole('button', { name: 'Add event' }))
+    await screen.findByText('Tuesday event')
+
+    // Clicking the first day's header jumps into Day view for that date.
+    const firstDayHeader = container.querySelectorAll('.week-day-header > div')[0]
+    await user.click(firstDayHeader)
+
+    expect(screen.getByRole('button', { name: 'Day' })).toHaveClass('btn-primary')
+    expect(await screen.findByText('Monday event')).toBeInTheDocument()
+    expect(screen.queryByText('Tuesday event')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Week' }))
+    expect(await screen.findByText('Tuesday event')).toBeInTheDocument()
+  })
 })

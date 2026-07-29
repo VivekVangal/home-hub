@@ -3,38 +3,42 @@ import { useLiveData } from '../hooks/useLiveData.js'
 import { usePeople } from '../hooks/usePeople.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { getEvents, addEvent, updateEvent, deleteEvent } from '../db.js'
-import { getWeekStart, getWeekDays, addDaysISO, formatShortDate } from '../utils/dates.js'
+import { getWeekStart, getWeekDays, addDaysISO, formatShortDate, formatDisplayDate, todayISO } from '../utils/dates.js'
 import { ALL } from '../consts.js'
 import WeekCalendar from '../components/WeekCalendar.jsx'
 import EventModal from '../components/EventModal.jsx'
 
 export default function CalendarPage() {
+  const [viewMode, setViewMode] = useState('week') // 'week' | 'day'
   const [weekStart, setWeekStart] = useState(getWeekStart())
+  const [selectedDay, setSelectedDay] = useState(todayISO())
   const { data: events } = useLiveData(getEvents, [])
   const { people, ownerById } = usePeople()
   const { user } = useAuth()
   const [viewAs, setViewAs] = useState('all') // 'all' (combined) or a person id (individual)
   const [modalState, setModalState] = useState(null) // { mode: 'add'|'edit', event? }
 
-  const weekDays = getWeekDays(weekStart)
-  const weekEvents = useMemo(
+  const days = viewMode === 'week' ? getWeekDays(weekStart) : [selectedDay]
+  const rangeEvents = useMemo(
     () => (events || [])
       // Training-plan sessions are private to whoever generated them — a
       // deliberate exception to this app's normally shared-by-default
       // calendar (see TrainingPage.jsx / docs/ARCHITECTURE.md).
       .filter((e) => !e.trainingPlan || e.owner === user?.uid)
-      .filter((e) => weekDays.includes(e.date)),
-    [events, weekStart, user]
+      .filter((e) => days.includes(e.date)),
+    [events, days, user]
   )
 
   // Individual view shows that person's own items plus anything shared with
   // "Everyone"; combined view shows every event regardless of owner.
   const visibleEvents = useMemo(
-    () => (viewAs === 'all' ? weekEvents : weekEvents.filter((e) => e.owner === viewAs || e.owner === 'all')),
-    [weekEvents, viewAs]
+    () => (viewAs === 'all' ? rangeEvents : rangeEvents.filter((e) => e.owner === viewAs || e.owner === 'all')),
+    [rangeEvents, viewAs]
   )
 
-  const label = `${formatShortDate(weekDays[0])} – ${formatShortDate(weekDays[6])}`
+  const label = viewMode === 'week'
+    ? `${formatShortDate(days[0])} – ${formatShortDate(days[6])}`
+    : formatDisplayDate(selectedDay)
 
   const handleSave = async (data) => {
     if (modalState.event) {
@@ -48,6 +52,28 @@ export default function CalendarPage() {
   const handleDelete = async (id) => {
     await deleteEvent(id)
     setModalState(null)
+  }
+
+  const goPrev = () => {
+    if (viewMode === 'week') setWeekStart(addDaysISO(weekStart, -7))
+    else setSelectedDay(addDaysISO(selectedDay, -1))
+  }
+
+  const goNext = () => {
+    if (viewMode === 'week') setWeekStart(addDaysISO(weekStart, 7))
+    else setSelectedDay(addDaysISO(selectedDay, 1))
+  }
+
+  const goToToday = () => {
+    if (viewMode === 'week') setWeekStart(getWeekStart())
+    else setSelectedDay(todayISO())
+  }
+
+  // Clicking a day's header in week mode jumps straight into day mode for
+  // that date, so "see this one day in more detail" is always one click away.
+  const jumpToDay = (day) => {
+    setSelectedDay(day)
+    setViewMode('day')
   }
 
   return (
@@ -76,13 +102,19 @@ export default function CalendarPage() {
 
       <div className="week-nav">
         <div className="week-nav-controls">
-          <button className="btn" onClick={() => setWeekStart(addDaysISO(weekStart, -7))}>← Prev</button>
+          <button className="btn" onClick={goPrev}>← Prev</button>
           <div className="week-nav-label">{label}</div>
-          <button className="btn" onClick={() => setWeekStart(addDaysISO(weekStart, 7))}>Next →</button>
+          <button className="btn" onClick={goNext}>Next →</button>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={() => setWeekStart(getWeekStart())}>This week</button>
-          <button className="btn btn-primary" onClick={() => setModalState({ event: null, defaultDate: weekDays[0] })}>
+          <button className={'btn' + (viewMode === 'week' ? ' btn-primary' : '')} onClick={() => setViewMode('week')}>
+            Week
+          </button>
+          <button className={'btn' + (viewMode === 'day' ? ' btn-primary' : '')} onClick={() => setViewMode('day')}>
+            Day
+          </button>
+          <button className="btn" onClick={goToToday}>{viewMode === 'week' ? 'This week' : 'Today'}</button>
+          <button className="btn btn-primary" onClick={() => setModalState({ event: null, defaultDate: days[0] })}>
             + Add event
           </button>
         </div>
@@ -92,11 +124,12 @@ export default function CalendarPage() {
         <div className="empty-state">Loading…</div>
       ) : (
         <WeekCalendar
-          weekStart={weekStart}
+          days={days}
           events={visibleEvents}
           ownerById={ownerById}
           onDayAdd={(day) => setModalState({ event: null, defaultDate: day })}
           onEventClick={(ev) => setModalState({ event: ev })}
+          onDayLabelClick={viewMode === 'week' ? jumpToDay : undefined}
         />
       )}
 

@@ -1,8 +1,12 @@
-import { getWeekDays, formatDayLabel, formatShortDate, todayISO } from '../utils/dates.js'
+import { formatDayLabel, formatShortDate, todayISO } from '../utils/dates.js'
 import { ALL } from '../consts.js'
+import { formatStravaSummary } from '../lib/strava.js'
 
-export default function WeekCalendar({ weekStart, events, ownerById, onDayAdd, onEventClick }) {
-  const days = getWeekDays(weekStart)
+// Renders one column per entry in `days` — a 7-element array for the week
+// view, or a single-element array for the day view (CalendarPage.jsx picks
+// which). Same day-cell markup either way; the CSS grid just ends up with
+// fewer columns.
+export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEventClick, onDayLabelClick }) {
   const today = todayISO()
 
   const eventsByDay = days.reduce((acc, d) => {
@@ -15,7 +19,10 @@ export default function WeekCalendar({ weekStart, events, ownerById, onDayAdd, o
       {days.map((day) => (
         <div key={day} className={'week-day' + (day === today ? ' is-today' : '')}>
           <div className="week-day-header">
-            <div>
+            <div
+              onClick={onDayLabelClick ? () => onDayLabelClick(day) : undefined}
+              style={onDayLabelClick ? { cursor: 'pointer' } : undefined}
+            >
               <div className="week-day-name">{formatDayLabel(day)}</div>
               <div className="week-day-date">{formatShortDate(day)}</div>
             </div>
@@ -25,6 +32,7 @@ export default function WeekCalendar({ weekStart, events, ownerById, onDayAdd, o
             {eventsByDay[day].length === 0 && <div className="week-day-empty">—</div>}
             {eventsByDay[day].map((ev) => {
               const owner = ownerById[ev.owner] || ALL
+              const stravaSummary = formatStravaSummary(ev)
               return (
                 <button
                   key={ev.id}
@@ -34,6 +42,7 @@ export default function WeekCalendar({ weekStart, events, ownerById, onDayAdd, o
                 >
                   {ev.startTime && <span className="event-time">{ev.startTime}</span>}
                   <span className="event-title">{ev.title}</span>
+                  {stravaSummary && <span className="event-time">{stravaSummary}</span>}
                 </button>
               )
             })}

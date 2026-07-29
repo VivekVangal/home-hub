@@ -4,6 +4,7 @@ import { cleanup } from '@testing-library/react'
 import * as appMock from './mocks/appMock.js'
 import * as firestoreMock from './mocks/firestoreMock.js'
 import * as authMock from './mocks/authMock.js'
+import * as functionsMock from './mocks/functionsMock.js'
 
 // The whole app talks to Firebase (Auth + Firestore). None of that is
 // reachable in tests (no real project, no emulator, no network in this
@@ -14,6 +15,7 @@ import * as authMock from './mocks/authMock.js'
 vi.mock('firebase/app', () => appMock)
 vi.mock('firebase/firestore', () => firestoreMock)
 vi.mock('firebase/auth', () => authMock)
+vi.mock('firebase/functions', () => functionsMock)
 
 // Every test starts from a clean slate: no leftover DOM, no leftover
 // localStorage, and fresh (empty) fake Firestore/Auth state.
@@ -22,4 +24,5 @@ afterEach(() => {
   window.localStorage.clear()
   firestoreMock.resetFirestoreMock()
   authMock.resetAuthMock()
+  functionsMock.resetFunctionsMock()
 })

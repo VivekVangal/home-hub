@@ -9,7 +9,7 @@ Built with React + Vite + Firebase (Auth + Firestore), structured the same way a
 - **Sign in / Sign up** — email+password or Google. Every family member has their own account, not a shared household login.
 - **Create or join a family** — the first person creates a family and gets a 6-character invite code; everyone else signs up and enters that code to join.
 - **Dashboard** (`/`) — today's schedule, this week's remaining groceries, and overdue/upcoming tasks, all in one view.
-- **Calendar** (`/calendar`) — week view, add/edit/delete events, assign each event to a family member or "Everyone." A **Combined / individual** filter lets you view the whole family's calendar or just one person's (their own events plus anything shared).
+- **Calendar** (`/calendar`) — week or day view (toggle, or click a day header to jump into that day), add/edit/delete events, assign each event to a family member or "Everyone." A **Combined / individual** filter lets you view the whole family's calendar or just one person's (their own events plus anything shared).
 - **Groceries** (`/groceries`) — a list scoped to the current week (Mon–Sun). Adding/checking off items here is what shows up on the dashboard.
 - **Tasks** (`/tasks`) — two tabs: **Maintenance** (recurring upkeep like HVAC filters, gutter cleaning, with due dates and repeat intervals) and **To-dos** (anything else). Completing a recurring maintenance task automatically creates the next occurrence. Same Combined/individual filter as the calendar.
 - **Settings** (`/settings`) — your family's invite code (to bring in more members), plus rename/recolor/remove for existing members.
