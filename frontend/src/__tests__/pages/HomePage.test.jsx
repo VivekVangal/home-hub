@@ -4,19 +4,23 @@ import { MemoryRouter } from 'react-router-dom'
 import HomePage from '../../pages/HomePage.jsx'
 import { addEvent, addTask, addGroceryItem } from '../../db.js'
 import { todayISO, getWeekStart, addDaysISO } from '../../utils/dates.js'
-import { seedTestFamily } from '../../test/helpers.js'
+import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
 
+// HomePage reads useAuth() to keep training-plan events/tasks private to
+// whoever created them — see HomePage.jsx — so it needs a signed-in,
+// family-having context, same as SettingsPage/TrainingPage's tests.
 function renderHome() {
   return render(
     <MemoryRouter>
       <HomePage />
-    </MemoryRouter>
+    </MemoryRouter>,
+    { wrapper: AllProviders }
   )
 }
 
 describe('HomePage dashboard', () => {
   beforeEach(async () => {
-    await seedTestFamily()
+    await setupSignedInFamily()
   })
 
   test('shows empty states when there is no data yet', async () => {

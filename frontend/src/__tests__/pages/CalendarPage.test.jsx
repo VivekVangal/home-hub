@@ -2,28 +2,36 @@ import { describe, test, expect, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CalendarPage from '../../pages/CalendarPage.jsx'
-import { seedTestFamily } from '../../test/helpers.js'
+import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
 
 // These exercise the "combined vs. individual" calendar requirement end to
 // end: an event owned by one person should be hidden from the other
 // person's individual view but visible in Combined, while an event owned by
 // "Everyone" should show up in every view.
+//
+// CalendarPage reads useAuth() to keep training-plan events private to
+// whoever created them — see CalendarPage.jsx — so it needs a signed-in,
+// family-having context, same as SettingsPage/TrainingPage's tests.
+
+function renderCalendar() {
+  return render(<CalendarPage />, { wrapper: AllProviders })
+}
 
 describe('CalendarPage — individual vs combined views', () => {
   beforeEach(async () => {
-    await seedTestFamily()
+    await setupSignedInFamily()
   })
 
   test('renders a Combined chip plus one chip per family member', async () => {
-    render(<CalendarPage />)
+    renderCalendar()
     expect(await screen.findByRole('button', { name: 'Combined' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Person 1' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Person 2' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Person 1' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Person 2' })).toBeInTheDocument()
   })
 
   test('a personal event is visible in Combined and that person\'s view, hidden from the other person', async () => {
     const user = userEvent.setup()
-    render(<CalendarPage />)
+    renderCalendar()
     await screen.findByRole('button', { name: 'Combined' })
 
     await user.click(screen.getByRole('button', { name: '+ Add event' }))
@@ -49,7 +57,7 @@ describe('CalendarPage — individual vs combined views', () => {
 
   test('an "Everyone" event shows up in every individual view', async () => {
     const user = userEvent.setup()
-    render(<CalendarPage />)
+    renderCalendar()
     await screen.findByRole('button', { name: 'Combined' })
 
     await user.click(screen.getByRole('button', { name: '+ Add event' }))
