@@ -112,7 +112,7 @@ The one wrinkle this creates: joining a family by invite code needs *some* way t
 
 `firestore.indexes.json` is intentionally empty — every query here uses either a single field or multiple equality (`==`) filters, which Firestore serves from its automatic indexes; sorting happens client-side in `db.js` instead of via `orderBy`, so no composite indexes are needed.
 
-See **[`GCP_PLAN.md`](./GCP_PLAN.md)** for the full design rationale, including the security rules sketch this was built from and what's intentionally deferred (Cloud Functions for invite-code lookups, push notifications, etc.).
+See **[`GCP_PLAN.md`](./GCP_PLAN.md)** for the full design rationale, including the security rules sketch this was built from and what's intentionally deferred (Cloud Functions for invite-code lookups, push notifications, etc.). See **[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)** for a diagram of how the pieces connect, plus a cost breakdown of running this on Firebase.
 
 ## Customizing
 
