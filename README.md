@@ -15,9 +15,25 @@ Built with React + Vite + Firebase (Auth + Firestore), structured the same way a
 - **Settings** (`/settings`) — your family's invite code (to bring in more members), plus rename/recolor/remove for existing members.
 - **Real-time sync** — changes made on one device show up on another within a second or two (Firestore listeners), not just on next page load.
 
-## Firebase setup (do this once)
+## Setup: the fast way
 
-I don't have GCP credentials or general internet access in the sandbox this was built in, so I couldn't create the project or run these steps myself. Here's exactly what to do:
+I don't have GCP credentials or general internet access in the sandbox this was built in, so I couldn't create the GitHub repo or Firebase project myself. `scripts/setup.sh` automates as much of it as a script actually can:
+
+```bash
+cd home-hub
+chmod +x scripts/setup.sh
+./scripts/setup.sh
+```
+
+It creates the GitHub repo and pushes (via `gh`), creates the Firebase project, creates the Firestore database, registers the web app, wires up GitHub Actions auto-deploy (via `firebase init hosting:github`), and sets the GitHub secrets — all with the defaults `vivekvangal/home-hub` (public repo) and `home-hub-family` (Firebase project id). Override either with env vars, e.g. `FIREBASE_PROJECT_ID=my-id ./scripts/setup.sh`.
+
+**One thing it can't do:** there's no CLI for enabling Firebase Auth sign-in providers. The script pauses and tells you to enable Email/Password and Google in the console, then waits for you to hit Enter before continuing. Every other step is either fully automatic or fails soft with fallback instructions printed if your `firebase-tools`/`gh` CLI versions behave differently than expected — I couldn't test this script against a real Firebase account, so treat step failures as "do this one step manually" rather than a sign the whole thing is broken.
+
+Requires `git`, `node`/`npm` (installs `firebase-tools` itself if missing), and ideally the [GitHub CLI](https://cli.github.com) (`gh`) — without `gh` it'll print the manual repo-creation steps instead of automating them.
+
+## Setup: the manual way
+
+If you'd rather not run a script, or want to understand what it's doing:
 
 1. **Create the project.** Go to https://console.firebase.google.com → Add project → name it whatever you want (e.g. `home-hub-family`) → you can skip Google Analytics.
 2. **Enable Authentication.** In the console: Build → Authentication → Get started → enable **Email/Password**, and enable **Google** (add a support email when prompted).
@@ -32,8 +48,18 @@ I don't have GCP credentials or general internet access in the sandbox this was 
    cd home-hub
    firebase deploy --only firestore:rules,firestore:indexes
    ```
+8. **Create the GitHub repo and push:**
+   ```bash
+   git remote add origin https://github.com/<you>/home-hub.git
+   git push -u origin main
+   ```
+9. **Generate a Firebase service account key** for CI: Firebase Console → Project Settings → Service accounts → Generate new private key. This downloads a JSON file — **never commit it**.
+10. **Add GitHub repo secrets** (repo Settings → Secrets and variables → Actions → New repository secret):
+    - `FIREBASE_SERVICE_ACCOUNT` — paste the entire contents of the JSON key file from step 9.
+    - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` — same 6 values from `.env.local`.
+11. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds, deploys the frontend to Firebase Hosting, and deploys `firestore.rules`/`firestore.indexes.json` — every push to `main` from then on auto-deploys.
 
-At this point `npm run dev` inside `frontend/` gives you a fully working, real, multi-device app.
+Either way, your live URL will be `https://<your-project-id>.web.app`.
 
 ## Run it locally
 
@@ -44,25 +70,6 @@ npm run dev
 ```
 
 Open http://localhost:5173, sign up, create a family, and share the invite code with whoever else should join (they sign up separately and enter the code).
-
-## Publishing it for real (Firebase Hosting + CI/CD)
-
-1. **Create a GitHub repo** for this project and push it:
-   ```bash
-   cd home-hub
-   git init
-   git add .
-   git commit -m "Home Hub: Firebase Auth + Firestore integration"
-   git branch -M main
-   git remote add origin https://github.com/<you>/home-hub.git
-   git push -u origin main
-   ```
-2. **Generate a Firebase service account key** for CI: Firebase Console → Project Settings → Service accounts → Generate new private key. This downloads a JSON file — **never commit it**.
-3. **Add GitHub repo secrets** (repo Settings → Secrets and variables → Actions → New repository secret):
-   - `FIREBASE_SERVICE_ACCOUNT` — paste the entire contents of the JSON key file from step 2.
-   - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` — same 6 values from `.env.local`.
-4. **Push to `main`.** `.github/workflows/deploy.yml` runs the tests, builds, deploys the frontend to Firebase Hosting, and deploys `firestore.rules`/`firestore.indexes.json` — every push to `main` from then on auto-deploys.
-5. Your live URL will be `https://<your-project-id>.web.app`.
 
 ## Run the tests
 
