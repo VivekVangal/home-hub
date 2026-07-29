@@ -160,6 +160,39 @@ export async function deleteEvent(id) {
   notifyChange('events')
 }
 
+// Bulk-inserts training-plan sessions (see lib/trainingPlan.js) as events in
+// one batch, rather than one addDoc() per session. Firestore batches cap at
+// 500 writes; a 12-week plan is ~84 sessions, well under that.
+export async function addTrainingPlan(events) {
+  const familyId = requireFamilyId()
+  const batch = writeBatch(db)
+  const refs = events.map((payload) => {
+    const ref = doc(collection(db, 'families', familyId, 'events'))
+    batch.set(ref, { notes: '', startTime: '', endTime: '', createdAt: Date.now(), ...payload })
+    return ref
+  })
+  await batch.commit()
+  notifyChange('events')
+  return refs.map((ref, i) => ({ id: ref.id, ...events[i] }))
+}
+
+// Removes every training-plan event still in the future (keeps past/completed
+// sessions as a log) — used when someone wants to regenerate the plan.
+// Filters by date client-side (not a second `where`) to stay consistent with
+// this app's no-composite-index design (see README/ARCHITECTURE.md) — a
+// single equality filter plus a range filter on a different field would
+// need one.
+export async function deleteUpcomingTrainingPlan(fromDateISO) {
+  if (!currentFamilyId) return
+  const snap = await getDocs(query(familyCollection('events'), where('trainingPlan', '==', true)))
+  const batch = writeBatch(db)
+  snap.forEach((d) => {
+    if ((d.data().date || '') >= fromDateISO) batch.delete(d.ref)
+  })
+  await batch.commit()
+  notifyChange('events')
+}
+
 // ======================= GROCERIES (weekly planner) =========================
 // Shape: { id, weekStart: 'YYYY-MM-DD' (Monday), name, quantity, category,
 //          checked, addedBy, createdAt }
