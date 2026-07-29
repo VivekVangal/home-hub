@@ -36,6 +36,7 @@ families/{familyId}/trainingProfiles/{uid} — { raceName, raceDateISO, raceDist
                                               recentRaceDistanceMiles, recentRaceTimeMinutes,
                                               currentWeeklyMileage, longestRecentRunMiles, days,
                                               equipment, injuryNotes, updatedAt }
+families/{familyId}/ideas/{ideaId}     — { title, type, status, notes, createdAt }
 users/{uid}                            — { uid, email, familyId }  (maps a signed-in user to their family)
 inviteCodes/{code}                     — { familyId }  (nothing else)
 ```

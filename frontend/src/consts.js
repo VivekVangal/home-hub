@@ -30,3 +30,15 @@ export const MAINTENANCE_CATEGORIES = [
   'Pest Control',
   'Other',
 ]
+
+// Ideas/Backlog page (/ideas) — product ideas and home automations the
+// family wants to get to eventually, tracked with a simple status pipeline
+// rather than left scattered across conversations.
+export const IDEA_TYPES = ['Automation', 'App feature', 'Other']
+
+export const IDEA_STATUSES = [
+  { value: 'idea', label: 'Idea' },
+  { value: 'planned', label: 'Planned' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'done', label: 'Done' },
+]

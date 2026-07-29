@@ -53,7 +53,7 @@ function notifyChange(key) {
   window.dispatchEvent(new CustomEvent('homehub:change', { detail: { key } }))
 }
 
-const LISTENED_COLLECTIONS = ['members', 'events', 'groceries', 'tasks', 'trainingProfiles']
+const LISTENED_COLLECTIONS = ['members', 'events', 'groceries', 'tasks', 'trainingProfiles', 'ideas']
 
 // Opens one onSnapshot listener per family-scoped collection. Returns an
 // unsubscribe function that tears all of them down (called by FamilyContext
@@ -214,6 +214,44 @@ export async function saveTrainingProfile(uid, data) {
   await setDoc(familyDoc('trainingProfiles', uid), { ...data, updatedAt: Date.now() }, { merge: true })
   notifyChange('trainingProfiles')
   return { id: uid, ...data }
+}
+
+// ===================== IDEAS (product ideas / home automations) =============
+// Shape: { id, title, type: 'Automation'|'App feature'|'Other', status:
+//          'idea'|'planned'|'in_progress'|'done', notes, createdAt }
+// Family-shared, like tasks/events/groceries — this is a household backlog,
+// not personal data (unlike trainingProfiles above).
+
+export async function getIdeas() {
+  if (!currentFamilyId) return []
+  const snap = await getDocs(familyCollection('ideas'))
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+
+export async function addIdea(data) {
+  requireFamilyId()
+  const payload = { type: 'Other', status: 'idea', notes: '', createdAt: Date.now(), ...data }
+  const ref = await addDoc(familyCollection('ideas'), payload)
+  notifyChange('ideas')
+  return { id: ref.id, ...payload }
+}
+
+export async function updateIdea(id, data) {
+  if (!currentFamilyId) return null
+  const ref = familyDoc('ideas', id)
+  const existing = await getDoc(ref)
+  if (!existing.exists()) return null
+  await updateDoc(ref, data)
+  notifyChange('ideas')
+  return { id, ...existing.data(), ...data }
+}
+
+export async function deleteIdea(id) {
+  if (!currentFamilyId) return
+  await deleteDoc(familyDoc('ideas', id))
+  notifyChange('ideas')
 }
 
 // ======================= GROCERIES (weekly planner) =========================

@@ -10,6 +10,7 @@ import CalendarPage from './pages/CalendarPage.jsx'
 import GroceryPage from './pages/GroceryPage.jsx'
 import TasksPage from './pages/TasksPage.jsx'
 import TrainingPage from './pages/TrainingPage.jsx'
+import IdeasPage from './pages/IdeasPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 
 // Three gates, in order: are we signed in? do we have a family? only then
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/groceries" element={<GroceryPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/training" element={<TrainingPage />} />
+          <Route path="/ideas" element={<IdeasPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<HomePage />} />
         </Routes>
