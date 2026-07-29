@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import {
-  doc, setDoc, collection, query, where, getDocs, onSnapshot, serverTimestamp,
+  doc, getDoc, setDoc, collection, getDocs, onSnapshot, serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../firebase.js'
 import { useAuth } from './AuthContext.jsx'
@@ -79,6 +79,16 @@ export function FamilyProvider({ children }) {
       inviteCode: code,
       createdAt: serverTimestamp(),
     })
+    // A separate, minimal-info lookup doc: maps an invite code to nothing
+    // but a familyId. This is what lets joinFamily() resolve a code with a
+    // single get-by-id instead of a query across the whole `families`
+    // collection — which matters because Firestore rules can't restrict
+    // *which* documents a query is allowed to match, only whether matched
+    // documents are readable. A broad query would've forced us to make every
+    // family's name/owner readable by any signed-in user, even from
+    // unrelated families. A direct get-by-id can be locked down to "you may
+    // read this if you already know the exact code" (see firestore.rules).
+    await setDoc(doc(db, 'inviteCodes', code), { familyId: familyRef.id })
     await setDoc(doc(db, 'families', familyRef.id, 'members', user.uid), {
       uid: user.uid,
       name: user.displayName || user.email,
@@ -93,22 +103,21 @@ export function FamilyProvider({ children }) {
   const joinFamily = useCallback(async (rawCode) => {
     if (!user) throw new Error('Must be signed in to join a family')
     const code = rawCode.trim().toUpperCase()
-    const q = query(collection(db, 'families'), where('inviteCode', '==', code))
-    const snap = await getDocs(q)
-    if (snap.empty) {
+    const lookup = await getDoc(doc(db, 'inviteCodes', code))
+    if (!lookup.exists()) {
       throw new Error("That invite code doesn't match any family — double check with whoever sent it.")
     }
-    const familyDoc = snap.docs[0]
-    const color = await nextAvailableColor(familyDoc.id)
-    await setDoc(doc(db, 'families', familyDoc.id, 'members', user.uid), {
+    const familyId = lookup.data().familyId
+    const color = await nextAvailableColor(familyId)
+    await setDoc(doc(db, 'families', familyId, 'members', user.uid), {
       uid: user.uid,
       name: user.displayName || user.email,
       color,
       role: 'member',
       joinedAt: serverTimestamp(),
     })
-    await setDoc(doc(db, 'users', user.uid), { uid: user.uid, email: user.email, familyId: familyDoc.id }, { merge: true })
-    return familyDoc.id
+    await setDoc(doc(db, 'users', user.uid), { uid: user.uid, email: user.email, familyId }, { merge: true })
+    return familyId
   }, [user])
 
   const value = {

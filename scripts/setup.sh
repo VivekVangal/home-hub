@@ -54,6 +54,25 @@ if ! command -v firebase >/dev/null 2>&1; then
 fi
 ok "firebase-tools found"
 
+# firebase-tools reads .firebaserc on startup for basically any command —
+# including 'firebase login' — and errors out immediately if the "default"
+# project id in it isn't a validly-formatted project id. It ships in this
+# repo with a literal placeholder, so this has to be fixed before we call
+# firebase-tools for anything at all.
+if [ -f .firebaserc ] && grep -q REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID .firebaserc; then
+  sed -i.bak "s/REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID/$FIREBASE_PROJECT_ID/" .firebaserc && rm -f .firebaserc.bak
+  ok "Updated .firebaserc -> $FIREBASE_PROJECT_ID (before touching firebase-tools at all)"
+fi
+
+# Make sure we're on 'main' before creating/pushing the GitHub repo — the
+# deploy workflow only triggers on pushes to main, and plain 'git init'
+# defaults to 'master' unless your global git config says otherwise.
+CURRENT_BRANCH="$(git branch --show-current 2>/dev/null || echo '')"
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  git branch -M main
+  ok "Renamed local branch '$CURRENT_BRANCH' -> main"
+fi
+
 # --- 1. GitHub repo: create + push ------------------------------------------
 bold "1. GitHub repo"
 if git remote get-url origin >/dev/null 2>&1; then
@@ -86,12 +105,6 @@ else
   firebase projects:create "$FIREBASE_PROJECT_ID" --display-name "$FIREBASE_DISPLAY_NAME" \
     && ok "Created project $FIREBASE_PROJECT_ID" \
     || { warn "Couldn't create that project id (maybe already taken globally). Create one manually at https://console.firebase.google.com, then re-run with FIREBASE_PROJECT_ID=<your-id> ./scripts/setup.sh"; exit 1; }
-fi
-
-# Point .firebaserc at the real project id.
-if [ -f .firebaserc ]; then
-  sed -i.bak "s/REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID/$FIREBASE_PROJECT_ID/" .firebaserc && rm -f .firebaserc.bak
-  ok "Updated .firebaserc -> $FIREBASE_PROJECT_ID"
 fi
 
 # --- 4. Create the Firestore database ----------------------------------------

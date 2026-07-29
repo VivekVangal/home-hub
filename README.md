@@ -101,9 +101,14 @@ families/{familyId}/events/{eventId}   — { title, date, startTime, endTime, ow
 families/{familyId}/tasks/{taskId}     — { type, title, category, dueDate, owner, recurrence, done, notes, createdAt }
 families/{familyId}/groceries/{itemId} — { name, quantity, category, checked, addedBy, weekStart, createdAt }
 users/{uid}                            — { uid, email, familyId }  (maps a signed-in user to their family)
+inviteCodes/{code}                     — { familyId }  (nothing else — see below)
 ```
 
-`owner` (and `addedBy`) is either a specific member's `uid` or the synthetic `"all"` value for anything shared with the whole family — that's what the Combined/individual filter checks. Security rules (`firestore.rules`) only let a signed-in user read/write a family's data if they have a `members/{their-uid}` doc in that family.
+`owner` (and `addedBy`) is either a specific member's `uid` or the synthetic `"all"` value for anything shared with the whole family — that's what the Combined/individual filter checks.
+
+**Privacy: families can't see each other at all.** `firestore.rules` only lets a signed-in user read/write a family's data — including just the family's *name* — if they have a `members/{their-uid}` doc in that family. Nobody can browse or discover other families, even other Home Hub users you've never met.
+
+The one wrinkle this creates: joining a family by invite code needs *some* way to look up a family from a code before you're a member of it — but a database query can't be restricted to "only if you already knew what you were looking for," only "can this signed-in user read documents matching this query" (Firestore rules see documents, not query intent). So instead of querying the `families` collection directly, `joinFamily()` looks up `inviteCodes/{code}` — a single get-by-exact-id, which the rules allow for any signed-in user (get, not list/query), because getting that specific document requires already knowing the 6-character code. That document holds nothing but a `familyId`; the real `families/{familyId}` doc — name, owner, everything else — stays members-only.
 
 `firestore.indexes.json` is intentionally empty — every query here uses either a single field or multiple equality (`==`) filters, which Firestore serves from its automatic indexes; sorting happens client-side in `db.js` instead of via `orderBy`, so no composite indexes are needed.
 
