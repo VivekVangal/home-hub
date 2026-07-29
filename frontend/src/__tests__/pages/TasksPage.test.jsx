@@ -30,7 +30,7 @@ describe('TasksPage', () => {
     await user.click(screen.getByRole('button', { name: 'Add' }))
     await screen.findByText('Water the plants')
 
-    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('checkbox', { name: 'Mark "Water the plants" done' }))
     expect(screen.queryByText('Water the plants')).not.toBeInTheDocument()
 
     await user.click(screen.getByLabelText('Show completed'))
@@ -47,7 +47,7 @@ describe('TasksPage', () => {
     await user.click(screen.getByRole('button', { name: 'Add' }))
 
     await screen.findByText('Change HVAC filter')
-    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('checkbox', { name: 'Mark "Change HVAC filter" done' }))
 
     // The completed one is hidden by default; the freshly spawned one (due a
     // month later, not done) should still be visible under the same title.
