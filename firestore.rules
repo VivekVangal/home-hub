@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(familyId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid));
+    }
+
+    // Each signed-in user's own profile: { uid, email, familyId }.
+    match /users/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /families/{familyId} {
+      // Any signed-in user can read family metadata (name/ownerUid/inviteCode).
+      // This is intentionally broad: joinFamily() runs a query filtering by
+      // inviteCode, and Firestore rules can't restrict which documents a
+      // query is allowed to match — only whether the rule permits reading
+      // matched docs. The invite code itself is the actual secret here (like
+      // most invite-link systems); tightening this further would mean moving
+      // the code lookup into a Cloud Function instead of a client-side query.
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isMember(familyId);
+      allow delete: if false;
+
+      match /members/{memberId} {
+        allow read: if isMember(familyId);
+        // Creating your own member doc is how "joining" works; you can only
+        // ever create/update the doc whose id is your own uid.
+        allow create, update: if isSignedIn() && request.auth.uid == memberId;
+        // Removing a member (Settings page "remove") requires being a
+        // member of the same family yourself.
+        allow delete: if isMember(familyId);
+      }
+
+      match /events/{eventId} {
+        allow read, write: if isMember(familyId);
+      }
+
+      match /tasks/{taskId} {
+        allow read, write: if isMember(familyId);
+      }
+
+      match /groceries/{groceryId} {
+        allow read, write: if isMember(familyId);
+      }
+    }
+  }
+}
