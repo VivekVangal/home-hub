@@ -44,6 +44,9 @@ export default function TasksPage() {
 
   const filtered = useMemo(() => {
     return (tasks || [])
+      // Training prep to-dos are private to whoever's training plan they
+      // belong to and live only on the Training page — see TrainingPage.jsx.
+      .filter((t) => !t.trainingTask)
       .filter((t) => t.type === tab)
       .filter((t) => showDone || !t.done)
       .filter((t) => viewAs === 'all' || t.owner === viewAs || t.owner === 'all')

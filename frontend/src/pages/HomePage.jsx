@@ -22,8 +22,11 @@ export default function HomePage() {
     .filter((e) => !e.trainingPlan || e.owner === user?.uid)
     .filter((e) => e.date === today)
   const groceriesRemaining = (groceries || []).filter((g) => !g.checked)
-  const overdueTasks = (tasks || []).filter((t) => !t.done && t.dueDate && isPastDue(t.dueDate))
-  const upcomingTasks = (tasks || [])
+  // Training prep to-dos stay off the shared dashboard, same as trainingPlan
+  // events above — see TrainingPage.jsx.
+  const householdTasks = (tasks || []).filter((t) => !t.trainingTask)
+  const overdueTasks = householdTasks.filter((t) => !t.done && t.dueDate && isPastDue(t.dueDate))
+  const upcomingTasks = householdTasks
     .filter((t) => !t.done && t.dueDate && !isPastDue(t.dueDate))
     .slice(0, 5)
 

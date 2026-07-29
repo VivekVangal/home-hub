@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TasksPage from '../../pages/TasksPage.jsx'
+import { addTask } from '../../db.js'
 import { seedTestFamily } from '../../test/helpers.js'
 
 describe('TasksPage', () => {
@@ -73,5 +74,20 @@ describe('TasksPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Combined' }))
     expect(await screen.findByText('Person 1 task')).toBeInTheDocument()
+  })
+
+  test('training prep to-dos stay off the household Tasks page, even with "Show completed" checked', async () => {
+    await addTask({ title: 'Register for race', owner: 'person-1', trainingTask: true })
+    const user = userEvent.setup()
+    render(<TasksPage />)
+    await user.click(screen.getByRole('button', { name: 'To-dos' }))
+
+    await user.click(screen.getByRole('button', { name: '+ Add' }))
+    await user.type(screen.getByPlaceholderText('Call the plumber'), 'Household to-do')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    await screen.findByText('Household to-do')
+
+    await user.click(screen.getByLabelText('Show completed'))
+    expect(screen.queryByText('Register for race')).not.toBeInTheDocument()
   })
 })
