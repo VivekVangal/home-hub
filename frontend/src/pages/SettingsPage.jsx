@@ -65,9 +65,15 @@ function PersonRow({ person, isSelf }) {
   )
 }
 
+function inviteMessage(familyName, inviteCode) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `Join ${familyName || 'our family'} on Home Hub! Go to ${origin}, sign up, and enter this invite code: ${inviteCode}`
+}
+
 function InviteCard() {
   const { familyName, inviteCode } = useFamily()
   const [copied, setCopied] = useState(false)
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
   const copy = async () => {
     try {
@@ -79,6 +85,23 @@ function InviteCard() {
     }
   }
 
+  const sendEmail = () => {
+    const subject = encodeURIComponent(`Join ${familyName || 'our family'} on Home Hub`)
+    const body = encodeURIComponent(inviteMessage(familyName, inviteCode))
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
+  }
+
+  const share = async () => {
+    try {
+      await navigator.share({
+        title: `Join ${familyName || 'our family'} on Home Hub`,
+        text: inviteMessage(familyName, inviteCode),
+      })
+    } catch {
+      // User cancelled the share sheet, or the browser blocked it — nothing to do.
+    }
+  }
+
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="section-title">Invite someone to {familyName || 'your family'}</div>
@@ -86,9 +109,13 @@ function InviteCard() {
         New members create their own account, then enter this code to join. There's no "add a person" form
         anymore — everyone gets their own login.
       </p>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <div className="invite-code">{inviteCode || '—'}</div>
         <button className="btn" onClick={copy} disabled={!inviteCode}>{copied ? 'Copied!' : 'Copy code'}</button>
+        <button className="btn" onClick={sendEmail} disabled={!inviteCode}>Send by email</button>
+        {canShare && (
+          <button className="btn" onClick={share} disabled={!inviteCode}>Share…</button>
+        )}
       </div>
     </div>
   )

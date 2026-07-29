@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest'
+import { describe, test, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import SettingsPage from '../../pages/SettingsPage.jsx'
@@ -18,6 +18,25 @@ describe('SettingsPage', () => {
     await setupSignedInFamily({ inviteCode: 'ABC123' })
     renderSettings()
     expect(await screen.findByText('ABC123')).toBeInTheDocument()
+  })
+
+  test('"Send by email" opens a mailto link containing the invite code', async () => {
+    await setupSignedInFamily({ inviteCode: 'ABC123' })
+    renderSettings()
+    await screen.findByText('ABC123')
+
+    // window.location.href is an accessor on jsdom's Location — spy on the
+    // setter so clicking the button doesn't attempt a real navigation.
+    const hrefSetter = vi.fn()
+    Object.defineProperty(window.location, 'href', { set: hrefSetter, configurable: true })
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Send by email' }))
+
+    expect(hrefSetter).toHaveBeenCalledTimes(1)
+    const [mailtoUrl] = hrefSetter.mock.calls[0]
+    expect(mailtoUrl).toMatch(/^mailto:\?subject=/)
+    expect(decodeURIComponent(mailtoUrl)).toContain('ABC123')
   })
 
   test('shows family members, marking the signed-in user as "you"', async () => {
