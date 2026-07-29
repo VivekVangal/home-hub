@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import {
-  collection, doc, getDocs, getDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDocs, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
   query, where, onSnapshot, writeBatch,
 } from 'firebase/firestore'
 import { db } from './firebase.js'
@@ -53,7 +53,7 @@ function notifyChange(key) {
   window.dispatchEvent(new CustomEvent('homehub:change', { detail: { key } }))
 }
 
-const LISTENED_COLLECTIONS = ['members', 'events', 'groceries', 'tasks']
+const LISTENED_COLLECTIONS = ['members', 'events', 'groceries', 'tasks', 'trainingProfiles']
 
 // Opens one onSnapshot listener per family-scoped collection. Returns an
 // unsubscribe function that tears all of them down (called by FamilyContext
@@ -191,6 +191,29 @@ export async function deleteUpcomingTrainingPlan(fromDateISO) {
   })
   await batch.commit()
   notifyChange('events')
+}
+
+// ===================== TRAINING PROFILES (per-user, private) ================
+// Shape: { raceName, raceDateISO, raceDistanceMiles, targetTimeMinutes,
+//          recentRaceDistanceMiles, recentRaceTimeMinutes, currentWeeklyMileage,
+//          longestRecentRunMiles, days, equipment, injuryNotes, updatedAt }
+//
+// Keyed by uid, not a list — each person's own goals/race/injury notes are
+// theirs alone. firestore.rules restricts this collection to
+// request.auth.uid == the document id, stricter than every other
+// family-shared collection here (see docs/ARCHITECTURE.md).
+
+export async function getTrainingProfile(uid) {
+  if (!currentFamilyId || !uid) return null
+  const snap = await getDoc(familyDoc('trainingProfiles', uid))
+  return snap.exists() ? { id: uid, ...snap.data() } : null
+}
+
+export async function saveTrainingProfile(uid, data) {
+  requireFamilyId()
+  await setDoc(familyDoc('trainingProfiles', uid), { ...data, updatedAt: Date.now() }, { merge: true })
+  notifyChange('trainingProfiles')
+  return { id: uid, ...data }
 }
 
 // ======================= GROCERIES (weekly planner) =========================

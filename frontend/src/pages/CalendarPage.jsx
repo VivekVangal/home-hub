@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLiveData } from '../hooks/useLiveData.js'
 import { usePeople } from '../hooks/usePeople.js'
+import { useAuth } from '../context/AuthContext.jsx'
 import { getEvents, addEvent, updateEvent, deleteEvent } from '../db.js'
 import { getWeekStart, getWeekDays, addDaysISO, formatShortDate } from '../utils/dates.js'
 import { ALL } from '../consts.js'
@@ -11,13 +12,19 @@ export default function CalendarPage() {
   const [weekStart, setWeekStart] = useState(getWeekStart())
   const { data: events } = useLiveData(getEvents, [])
   const { people, ownerById } = usePeople()
+  const { user } = useAuth()
   const [viewAs, setViewAs] = useState('all') // 'all' (combined) or a person id (individual)
   const [modalState, setModalState] = useState(null) // { mode: 'add'|'edit', event? }
 
   const weekDays = getWeekDays(weekStart)
   const weekEvents = useMemo(
-    () => (events || []).filter((e) => weekDays.includes(e.date)),
-    [events, weekStart]
+    () => (events || [])
+      // Training-plan sessions are private to whoever generated them — a
+      // deliberate exception to this app's normally shared-by-default
+      // calendar (see TrainingPage.jsx / docs/ARCHITECTURE.md).
+      .filter((e) => !e.trainingPlan || e.owner === user?.uid)
+      .filter((e) => weekDays.includes(e.date)),
+    [events, weekStart, user]
   )
 
   // Individual view shows that person's own items plus anything shared with

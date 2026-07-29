@@ -32,11 +32,15 @@ families/{familyId}/members/{uid}      — { uid, name, color, role, joinedAt }
 families/{familyId}/events/{eventId}   — { title, date, startTime, endTime, owner, notes, createdAt }
 families/{familyId}/tasks/{taskId}     — { type, title, category, dueDate, owner, recurrence, done, notes, createdAt }
 families/{familyId}/groceries/{itemId} — { name, quantity, category, checked, addedBy, weekStart, createdAt }
+families/{familyId}/trainingProfiles/{uid} — { raceName, raceDateISO, raceDistanceMiles, targetTimeMinutes,
+                                              recentRaceDistanceMiles, recentRaceTimeMinutes,
+                                              currentWeeklyMileage, longestRecentRunMiles, days,
+                                              equipment, injuryNotes, updatedAt }
 users/{uid}                            — { uid, email, familyId }  (maps a signed-in user to their family)
 inviteCodes/{code}                     — { familyId }  (nothing else)
 ```
 
-`owner` (and `addedBy`) is either a specific member's `uid` or the synthetic `"all"` value for anything shared with the whole family — that's what the Combined/individual filter checks.
+`owner` (and `addedBy`) is either a specific member's `uid` or the synthetic `"all"` value for anything shared with the whole family — that's what the Combined/individual filter checks. Events with `trainingPlan: true` are the one deliberate exception: `CalendarPage.jsx`/`HomePage.jsx` filter them out for anyone but the owner, so a personal training plan doesn't clutter — or leak pace/mileage detail into — everyone else's Combined view, even though the underlying `events` collection itself is still family-readable at the rules level (same as every other event). `trainingProfiles/{uid}` goes further: `firestore.rules` restricts it to `request.auth.uid == uid`, so unlike everything else in this app, another family member can't read it at all, not even by querying Firestore directly. `frontend/src/lib/trainingPlan.js` generates the plan from that profile — race distance, goal time, a recent race result (used for a Riegel-formula pace prediction if given), current mileage, and preferred training days — so it's a general plan builder, not specific to any one race.
 
 ## Privacy model
 

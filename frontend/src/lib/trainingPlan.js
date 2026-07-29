@@ -1,27 +1,46 @@
 // ---------------------------------------------------------------------------
-// Half-marathon training plan generator — turns HALF_MARATHON_PLAN.md's
-// methodology into concrete, dated sessions. Pure functions only (no
-// Firestore/db.js calls here) so this is easy to unit test; TrainingPage.jsx
-// is what actually persists the output via db.js.
+// Race-training plan generator — general-purpose, not tied to any one race.
+// Every family member can build their own (different race, distance, date,
+// goal), driven entirely by the answers in TrainingPlanForm.jsx. Pure
+// functions only (no Firestore/db.js calls) so this is easy to unit test;
+// TrainingPage.jsx is what actually persists the output via db.js.
 // ---------------------------------------------------------------------------
 
 import { addDaysISO, toISODate } from '../utils/dates.js'
 import { parseISO, startOfWeek, addWeeks, differenceInCalendarWeeks } from 'date-fns'
 
-export const RACE_DATE_ISO = '2026-10-18' // Baystate Half Marathon (Sunday)
-export const RACE_NAME = 'Baystate Half Marathon'
+// Common race distances, in miles, for the form's dropdown.
+export const DISTANCES = {
+  '5k': 3.107,
+  '10k': 6.214,
+  '15k': 9.321,
+  '10mile': 10,
+  half: 13.11,
+  full: 26.22,
+}
 
-// Two-tier goal, per HALF_MARATHON_PLAN.md: a realistic primary target and
-// the sub-2:15 stretch kept alive in the quality-workout paces.
-export const PACE = {
-  easy: '11:30-12:30/mi',
-  primaryLongRun: '11:00-11:50/mi',
-  stretchQuality: '10:00-10:18/mi',
+// Real, defensible defaults for this household's actual race — prefill the
+// form with these rather than making everyone start from a blank sheet.
+export const DEFAULT_PROFILE = {
+  raceName: 'Baystate Half Marathon',
+  raceDateISO: '2026-10-18',
+  raceDistanceMiles: DISTANCES.half,
+  targetTimeMinutes: 135, // sub-2:15 stretch goal
+  recentRaceDistanceMiles: DISTANCES.half,
+  recentRaceTimeMinutes: 170, // 2:50 half PR
+  currentWeeklyMileage: 8,
+  longestRecentRunMiles: 3,
+  equipment: 'bodyweight',
+  injuryNotes: '',
+  days: { rest: [0, 4], easy: [1, 5], strength: [2], quality: [3], long: [6] }, // Mon=0 .. Sun=6
 }
 
 const PHASE_SHARE = { base: 4 / 12, build: 5 / 12, taper: 3 / 12 }
 
-// Monday-start week containing (or equal to) the given ISO date.
+// ---------------------------------------------------------------------------
+// Date helpers
+// ---------------------------------------------------------------------------
+
 function weekStartISO(isoDate) {
   return toISODate(startOfWeek(parseISO(isoDate), { weekStartsOn: 1 }))
 }
@@ -43,7 +62,6 @@ export function computePhases(startISO, raceISO) {
   let build = Math.max(1, Math.round(totalWeeks * PHASE_SHARE.build))
   let taper = totalWeeks - base - build
   if (taper < 1) {
-    // Borrow back from build first, then base, keeping every phase >= 1 week.
     const shortfall = 1 - taper
     const fromBuild = Math.min(shortfall, build - 1)
     build -= fromBuild
@@ -60,74 +78,252 @@ function phaseForWeek(weekIndex, phases) {
   return 'taper'
 }
 
-// Linear interpolation helper, clamped to [a, b] as t goes 0 -> 1.
 function lerp(a, b, t) {
   return a + (b - a) * Math.max(0, Math.min(1, t))
 }
 
-// Long-run distance (miles) for a given week index, following the plan's
-// 3 -> 6 (base) -> 10-11 (build peak, week before taper) -> 8 -> shorter
-// (taper) progression, scaled to however many weeks are actually available.
-function longRunMiles(weekIndex, phases) {
+// ---------------------------------------------------------------------------
+// Goal analysis — Riegel's race-time-equivalence formula (T2 = T1 *
+// (D2/D1)^1.06) is a long-established, widely used way to estimate a
+// runner's expected time at one distance from a real result at another. If
+// no recent race is given, falls back to a much rougher estimate from
+// current weekly mileage — explicitly labeled as such, since it's a guess,
+// not a prediction.
+// ---------------------------------------------------------------------------
+
+export function predictTime(knownDistanceMiles, knownTimeMinutes, targetDistanceMiles) {
+  return knownTimeMinutes * Math.pow(targetDistanceMiles / knownDistanceMiles, 1.06)
+}
+
+export function fmtMinutesAsTime(totalMinutes) {
+  const wholeSeconds = Math.round(totalMinutes * 60)
+  const h = Math.floor(wholeSeconds / 3600)
+  const m = Math.floor((wholeSeconds % 3600) / 60)
+  const s = wholeSeconds % 60
+  const mm = String(m).padStart(h > 0 ? 2 : 1, '0')
+  const ss = String(s).padStart(2, '0')
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+}
+
+export function fmtPace(totalMinutes, distanceMiles) {
+  const perMile = totalMinutes / distanceMiles
+  const m = Math.floor(perMile)
+  const s = Math.round((perMile - m) * 60)
+  return `${m}:${String(s).padStart(2, '0')}/mi`
+}
+
+// Returns { basis, baselineMinutes, improvementPct, primary: {minutes, time, pace}, stretch: {...} }
+export function analyzeGoal({
+  raceDistanceMiles,
+  targetTimeMinutes,
+  recentRaceDistanceMiles,
+  recentRaceTimeMinutes,
+  currentWeeklyMileage,
+  weeksAvailable,
+}) {
+  let baselineMinutes
+  let basis
+  if (recentRaceDistanceMiles && recentRaceTimeMinutes) {
+    baselineMinutes = predictTime(recentRaceDistanceMiles, recentRaceTimeMinutes, raceDistanceMiles)
+    basis = 'recent-race'
+  } else {
+    // Rough fallback when there's no recent race result to extrapolate
+    // from: more weekly volume relative to race distance nudges the
+    // estimate faster, within a conservative 10-13 min/mi band. This is a
+    // starting point to plan around, not a real prediction.
+    const ratio = currentWeeklyMileage ? currentWeeklyMileage / raceDistanceMiles : 1
+    const estPace = 13 - Math.min(3, ratio * 0.6)
+    baselineMinutes = estPace * raceDistanceMiles
+    basis = 'mileage-estimate'
+  }
+
+  // Modest, conservative improvement assumption for a structured training
+  // block: more available weeks supports a bit more improvement, capped at
+  // 8% so this never promises something training science wouldn't back.
+  const improvementPct = Math.min(0.08, 0.015 * Math.sqrt(weeksAvailable || 1))
+  const primaryMinutes = baselineMinutes * (1 - improvementPct)
+
+  let stretchMinutes = primaryMinutes
+  if (targetTimeMinutes && targetTimeMinutes < primaryMinutes) {
+    stretchMinutes = targetTimeMinutes
+  }
+
+  return {
+    basis,
+    baselineMinutes,
+    improvementPct,
+    primary: {
+      minutes: primaryMinutes,
+      time: fmtMinutesAsTime(primaryMinutes),
+      pace: fmtPace(primaryMinutes, raceDistanceMiles),
+    },
+    stretch: {
+      minutes: stretchMinutes,
+      time: fmtMinutesAsTime(stretchMinutes),
+      pace: fmtPace(stretchMinutes, raceDistanceMiles),
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Long-run progression — target peak long run scales with race distance:
+// shorter races (5k/10k) benefit from a long run noticeably longer than the
+// race itself (aerobic base); half/full marathon long runs cap well under
+// the full distance (70-85%) to manage injury risk. Never demands more than
+// a reasonable jump from the runner's current longest run.
+// ---------------------------------------------------------------------------
+
+export function longRunTarget(raceDistanceMiles, longestRecentRunMiles) {
+  const base = longestRecentRunMiles || raceDistanceMiles * 0.25
+  let guideline
+  if (raceDistanceMiles <= 6.5) guideline = raceDistanceMiles * 1.3
+  else if (raceDistanceMiles <= 14) guideline = raceDistanceMiles * 0.85
+  else guideline = raceDistanceMiles * 0.7
+  return Math.max(guideline, base + 2)
+}
+
+// ---------------------------------------------------------------------------
+// Weekly session generation
+// ---------------------------------------------------------------------------
+
+function offsetKind(days, offset) {
+  for (const [kind, offsets] of Object.entries(days)) {
+    if (offsets.includes(offset)) return kind
+  }
+  return 'rest'
+}
+
+function easyMilesForWeek(weekIndex, phases) {
+  // Easy-run mileage ramps gently alongside the long run, capped modestly.
+  const phase = phaseForWeek(weekIndex, phases)
+  if (phase === 'taper') return 3
+  return phase === 'base' ? 3 : 4
+}
+
+function longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLongRun) {
   const { base, build, taper } = phases
   const phase = phaseForWeek(weekIndex, phases)
+  const buildPeak = targetLongRun
   if (phase === 'base') {
-    return Math.round(lerp(3, 6, base <= 1 ? 1 : weekIndex / (base - 1)))
+    return Math.round(lerp(longestRecentRunMiles || 3, Math.min(6, buildPeak), base <= 1 ? 1 : weekIndex / (base - 1)))
   }
   if (phase === 'build') {
     const i = weekIndex - base
-    return Math.round(lerp(6, 11, build <= 1 ? 1 : i / (build - 1)))
+    return Math.round(lerp(Math.min(6, buildPeak), buildPeak, build <= 1 ? 1 : i / (build - 1)))
   }
   const i = weekIndex - base - build
-  return Math.round(lerp(8, 2, taper <= 1 ? 1 : i / (taper - 1))) // race-week Sunday is the race itself, handled separately
+  return Math.round(lerp(Math.max(buildPeak * 0.7, 4), 2, taper <= 1 ? 1 : i / (taper - 1)))
 }
 
-// One week's session list, Monday -> Sunday, per the template in
-// HALF_MARATHON_PLAN.md. `isLastWeek` swaps Sunday for race day itself.
-function weekSessions(weekStart, weekIndex, phases, isLastWeek) {
+function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, targetLongRun, equipment }) {
   const phase = phaseForWeek(weekIndex, phases)
-  const inBuildOrLater = phase !== 'base'
-  const miles = longRunMiles(weekIndex, phases)
-
-  const days = [
-    { offset: 0, title: 'Rest / mobility', notes: '20 min easy walk or mobility work. Full rest is fine too.' },
-    { offset: 1, title: 'Easy run', notes: `3-4 mi, conversational pace (${PACE.easy}).` },
-    { offset: 2, title: 'Strength + stretch', notes: 'Lower body + core, 30-40 min, plus 10 min stretch.' },
-    inBuildOrLater
-      ? { offset: 3, title: 'Quality: tempo/intervals', notes: `3-5 mi total incl. warm-up/cooldown, quality miles at stretch pace (${PACE.stretchQuality}).` }
-      : { offset: 3, title: 'Easy run + strides', notes: `3-4 mi easy (${PACE.easy}) with 4-6 short strides at the end.` },
-    { offset: 4, title: 'Rest or cross-train', notes: 'Rest, or 30 min easy bike/swim.' },
-    { offset: 5, title: 'Easy run', notes: `3-4 mi, conversational pace (${PACE.easy}).` },
-  ]
-
-  if (isLastWeek) {
-    days.push({ offset: 6, title: RACE_NAME, notes: `Race day! Goal: primary 2:25-2:35 (${PACE.primaryLongRun}), stretch sub-2:15 (${PACE.stretchQuality}).` })
-  } else {
-    days.push({ offset: 6, title: 'Long run', notes: `${miles} mi, easy pace (${PACE.easy}) — slower than race pace on purpose.` })
+  switch (kind) {
+    case 'rest':
+      return { title: 'Rest / mobility', notes: '20 min easy walk or mobility work. Full rest is fine too.' }
+    case 'strength':
+      return {
+        title: 'Strength + stretch',
+        notes: `Lower body + core, 30-40 min (${equipment || 'bodyweight'}), plus 10 min stretch.`,
+      }
+    case 'quality':
+      if (phase === 'base') {
+        return { title: 'Easy run + strides', notes: `${easyMilesForWeek(weekIndex, phases)} mi easy with 4-6 short strides at the end.` }
+      }
+      return {
+        title: 'Quality: tempo/intervals',
+        notes: `3-5 mi total incl. warm-up/cooldown, quality miles at stretch pace (${goal.stretch.pace}).`,
+      }
+    case 'long':
+      return {
+        title: 'Long run',
+        notes: `${longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLongRun)} mi, easy pace — slower than race pace on purpose.`,
+      }
+    case 'easy':
+    default:
+      return { title: 'Easy run', notes: `${easyMilesForWeek(weekIndex, phases)} mi, conversational pace.` }
   }
-
-  return days.map((d) => ({
-    date: addDaysISO(weekStart, d.offset),
-    title: d.title,
-    notes: `[Week ${weekIndex + 1}/${phases.totalWeeks}, ${phase}] ${d.notes}`,
-    phase,
-  }))
 }
 
-// Builds the full plan: an array of { weekNumber, phase, sessions: [...] }.
-// `startISO` should be a Monday (use nextMondayISO(todayISO()) if unsure).
-export function buildTrainingPlan(startISO, raceISO = RACE_DATE_ISO) {
-  const phases = computePhases(startISO, raceISO)
+function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, targetLongRun) {
+  const phase = phaseForWeek(weekIndex, phases)
+  const days = profile.days || DEFAULT_PROFILE.days
+
+  const sessions = []
+  for (let offset = 0; offset < 7; offset++) {
+    const kind = offsetKind(days, offset)
+    // Race day replaces whichever day was chosen as the long-run day, in
+    // the final week only — not hardcoded to Sunday, since the long-run day
+    // is itself configurable in TrainingPlanForm.
+    if (isLastWeek && kind === 'long') {
+      sessions.push({
+        date: addDaysISO(weekStart, offset),
+        title: profile.raceName || 'Race day',
+        notes: `Race day! Primary goal ${goal.primary.time} (${goal.primary.pace}), stretch ${goal.stretch.time} (${goal.stretch.pace}).`,
+        phase,
+      })
+      continue
+    }
+    const { title, notes } = sessionForKind(kind, {
+      weekIndex,
+      phases,
+      goal,
+      longestRecentRunMiles: profile.longestRecentRunMiles,
+      targetLongRun,
+      equipment: profile.equipment,
+    })
+    sessions.push({
+      date: addDaysISO(weekStart, offset),
+      title,
+      notes: `[Week ${weekIndex + 1}/${phases.totalWeeks}, ${phase}] ${notes}`,
+      phase,
+    })
+  }
+  return sessions
+}
+
+// ---------------------------------------------------------------------------
+// Day-of-week assignment — TrainingPlanForm.jsx lets someone pick just the
+// three days that matter most (long run, quality workout, strength), and
+// this fills in the remaining four as easy/rest. Mon=0 .. Sun=6.
+// ---------------------------------------------------------------------------
+
+export function buildDaysMapping(longDay, qualityDay, strengthDay) {
+  const used = new Set([longDay, qualityDay, strengthDay])
+  const remaining = [0, 1, 2, 3, 4, 5, 6].filter((d) => !used.has(d))
+  return {
+    long: [longDay],
+    quality: [qualityDay],
+    strength: [strengthDay],
+    easy: remaining.slice(0, 2),
+    rest: remaining.slice(2),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+// Builds the full plan from a profile (see DEFAULT_PROFILE's shape).
+// `profile.startISO` must be a Monday on/after today — pass
+// nextMondayISO(todayISO()) from the caller (TrainingPage.jsx), since this
+// module has no notion of "today" itself (keeps it a pure function, easy to
+// test with fixed dates).
+export function buildTrainingPlan(profile) {
+  const { startISO } = profile
+  const phases = computePhases(startISO, profile.raceDateISO)
+  const goal = analyzeGoal({ ...profile, weeksAvailable: phases.totalWeeks })
+  const targetLongRun = longRunTarget(profile.raceDistanceMiles, profile.longestRecentRunMiles)
+
   const weeks = []
   for (let i = 0; i < phases.totalWeeks; i++) {
     const weekStart = toISODate(addWeeks(parseISO(startISO), i))
     weeks.push({
       weekNumber: i + 1,
       phase: phaseForWeek(i, phases),
-      sessions: weekSessions(weekStart, i, phases, i === phases.totalWeeks - 1),
+      sessions: weekSessions(weekStart, i, phases, i === phases.totalWeeks - 1, profile, goal, targetLongRun),
     })
   }
-  return { startISO, raceISO, phases, weeks }
+  return { startISO, profile, phases, goal, targetLongRun, weeks }
 }
 
 // Flattens a plan into Home Hub event-shaped objects, ready for addEvent()/

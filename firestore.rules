@@ -63,6 +63,15 @@ service cloud.firestore {
       match /groceries/{groceryId} {
         allow read, write: if isMember(familyId);
       }
+
+      // Training profiles hold personal goals, target times, and injury
+      // notes — deliberately stricter than everything else in this family's
+      // data. Every other collection here is member-wide readable (the
+      // whole point of a shared household calendar); this one is
+      // self-only, even from other members of the same family.
+      match /trainingProfiles/{uid} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
     }
   }
 }

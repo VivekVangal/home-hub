@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useLiveData } from '../hooks/useLiveData.js'
 import { usePeople } from '../hooks/usePeople.js'
+import { useAuth } from '../context/AuthContext.jsx'
 import { getEvents, getGroceryItems, getTasks } from '../db.js'
 import { todayISO, getWeekStart, formatDisplayDate, formatDayLabel, isPastDue } from '../utils/dates.js'
 import { ALL } from '../consts.js'
@@ -13,8 +14,13 @@ export default function HomePage() {
   const { data: groceries } = useLiveData(() => getGroceryItems(weekStart), [])
   const { data: tasks } = useLiveData(getTasks, [])
   const { ownerById } = usePeople()
+  const { user } = useAuth()
 
-  const todayEvents = (events || []).filter((e) => e.date === today)
+  // Training-plan sessions are private to whoever generated them, even on
+  // the shared dashboard — see CalendarPage.jsx for the same rule.
+  const todayEvents = (events || [])
+    .filter((e) => !e.trainingPlan || e.owner === user?.uid)
+    .filter((e) => e.date === today)
   const groceriesRemaining = (groceries || []).filter((g) => !g.checked)
   const overdueTasks = (tasks || []).filter((t) => !t.done && t.dueDate && isPastDue(t.dueDate))
   const upcomingTasks = (tasks || [])

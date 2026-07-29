@@ -4,17 +4,41 @@ import {
   computePhases,
   buildTrainingPlan,
   trainingPlanToEvents,
-  RACE_NAME,
+  analyzeGoal,
+  predictTime,
+  longRunTarget,
+  buildDaysMapping,
 } from '../../lib/trainingPlan.js'
 
 // Fixed dates so these tests don't depend on "today": 2026-08-03 is a
 // Monday, 2026-10-18 (the real race date) is the Sunday 11 weeks later.
 const START = '2026-08-03'
 const RACE = '2026-10-18'
+const HALF_MILES = 13.11
+
+const DAYS = buildDaysMapping(6, 3, 2) // long=Sun, quality=Thu, strength=Wed
+
+function baseProfile(overrides = {}) {
+  return {
+    raceName: 'Baystate Half Marathon',
+    raceDateISO: RACE,
+    startISO: START,
+    raceDistanceMiles: HALF_MILES,
+    targetTimeMinutes: 135, // 2:15 stretch goal
+    recentRaceDistanceMiles: HALF_MILES,
+    recentRaceTimeMinutes: 170, // 2:50 PR
+    currentWeeklyMileage: 8,
+    longestRecentRunMiles: 3,
+    days: DAYS,
+    equipment: 'bodyweight',
+    injuryNotes: '',
+    ...overrides,
+  }
+}
 
 describe('nextMondayISO', () => {
   test('rolls forward to the upcoming Monday from a mid-week date', () => {
-    expect(nextMondayISO('2026-07-29')).toBe('2026-08-03') // Wednesday -> next Monday
+    expect(nextMondayISO('2026-07-29')).toBe('2026-08-03')
   })
 
   test('returns the same date if it is already a Monday', () => {
@@ -29,21 +53,91 @@ describe('computePhases', () => {
     expect(phases.base).toBe(4)
     expect(phases.build).toBe(5)
     expect(phases.taper).toBe(2)
-    expect(phases.base + phases.build + phases.taper).toBe(phases.totalWeeks)
   })
 
   test('never produces a phase shorter than 1 week, even on a very short runway', () => {
     const phases = computePhases('2026-08-03', '2026-08-16') // 2 weeks total
     expect(phases.totalWeeks).toBe(2)
-    expect(phases.base).toBeGreaterThanOrEqual(1)
-    expect(phases.build).toBeGreaterThanOrEqual(1)
-    expect(phases.taper).toBeGreaterThanOrEqual(1)
     expect(phases.base + phases.build + phases.taper).toBe(phases.totalWeeks)
+    expect(Math.min(phases.base, phases.build, phases.taper)).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('predictTime (Riegel)', () => {
+  test('same distance in, same time out', () => {
+    expect(predictTime(13.11, 170, 13.11)).toBeCloseTo(170, 5)
+  })
+
+  test('predicts a slower time for a longer target distance', () => {
+    expect(predictTime(13.11, 170, 26.22)).toBeGreaterThan(170 * 2) // more than double, not less
+  })
+})
+
+describe('analyzeGoal', () => {
+  test('uses the Riegel prediction when a recent race is given', () => {
+    const goal = analyzeGoal({
+      raceDistanceMiles: HALF_MILES,
+      targetTimeMinutes: 135,
+      recentRaceDistanceMiles: HALF_MILES,
+      recentRaceTimeMinutes: 170,
+      weeksAvailable: 11,
+    })
+    expect(goal.basis).toBe('recent-race')
+    expect(goal.baselineMinutes).toBeCloseTo(170, 5)
+    expect(goal.primary.minutes).toBeLessThan(170) // some improvement assumed
+    expect(goal.primary.minutes).toBeGreaterThan(135) // but not as fast as the stretch goal
+    expect(goal.stretch.minutes).toBe(135) // explicit target, faster than primary, becomes the stretch
+  })
+
+  test('falls back to a mileage-based estimate with no recent race', () => {
+    const goal = analyzeGoal({
+      raceDistanceMiles: HALF_MILES,
+      currentWeeklyMileage: 8,
+      weeksAvailable: 11,
+    })
+    expect(goal.basis).toBe('mileage-estimate')
+    expect(goal.baselineMinutes).toBeGreaterThan(0)
+  })
+
+  test('never assumes more than an 8% improvement, however many weeks are available', () => {
+    const goal = analyzeGoal({
+      raceDistanceMiles: HALF_MILES,
+      recentRaceDistanceMiles: HALF_MILES,
+      recentRaceTimeMinutes: 170,
+      weeksAvailable: 999,
+    })
+    expect(goal.improvementPct).toBeLessThanOrEqual(0.08)
+  })
+})
+
+describe('longRunTarget', () => {
+  test('half marathon: caps well under full race distance', () => {
+    const target = longRunTarget(HALF_MILES, 3)
+    expect(target).toBeGreaterThan(8)
+    expect(target).toBeLessThan(HALF_MILES)
+  })
+
+  test('5k: long run exceeds the race distance itself (aerobic base)', () => {
+    const target = longRunTarget(3.107, 2)
+    expect(target).toBeGreaterThan(3.107)
+  })
+})
+
+describe('buildDaysMapping', () => {
+  test('assigns the remaining four days as two easy, two rest', () => {
+    const days = buildDaysMapping(6, 3, 2)
+    expect(days.long).toEqual([6])
+    expect(days.quality).toEqual([3])
+    expect(days.strength).toEqual([2])
+    expect(days.easy).toHaveLength(2)
+    expect(days.rest).toHaveLength(2)
+    const all = [...days.long, ...days.quality, ...days.strength, ...days.easy, ...days.rest].sort()
+    expect(all).toEqual([0, 1, 2, 3, 4, 5, 6])
   })
 })
 
 describe('buildTrainingPlan', () => {
-  const plan = buildTrainingPlan(START, RACE)
+  const plan = buildTrainingPlan(baseProfile())
 
   test('produces one week per computed phase week, 7 sessions each', () => {
     expect(plan.weeks).toHaveLength(11)
@@ -59,29 +153,32 @@ describe('buildTrainingPlan', () => {
     expect(plan.weeks[10].phase).toBe('taper')
   })
 
-  test('the very first session is on the start date, Monday', () => {
+  test('the first session is on the start date', () => {
     expect(plan.weeks[0].sessions[0].date).toBe(START)
-    expect(plan.weeks[0].sessions[0].title).toMatch(/rest/i)
   })
 
-  test('the last session of the last week is race day itself', () => {
+  test('the last session of the last week is race day itself, using the race name', () => {
     const lastWeek = plan.weeks[plan.weeks.length - 1]
-    const raceDay = lastWeek.sessions[6]
+    const raceDay = lastWeek.sessions[6] // Sunday, the configured long-run day
     expect(raceDay.date).toBe(RACE)
-    expect(raceDay.title).toBe(RACE_NAME)
+    expect(raceDay.title).toBe('Baystate Half Marathon')
   })
 
-  test('quality workouts only appear once base phase is over', () => {
-    const baseWeekTitles = plan.weeks[0].sessions.map((s) => s.title)
-    const buildWeekTitles = plan.weeks[4].sessions.map((s) => s.title)
-    expect(baseWeekTitles).not.toContain('Quality: tempo/intervals')
-    expect(buildWeekTitles).toContain('Quality: tempo/intervals')
+  test('quality workouts only turn into tempo/intervals once base phase is over', () => {
+    const baseWeekQuality = plan.weeks[0].sessions[3] // Thursday
+    const buildWeekQuality = plan.weeks[4].sessions[3]
+    expect(baseWeekQuality.title).toBe('Easy run + strides')
+    expect(buildWeekQuality.title).toBe('Quality: tempo/intervals')
+  })
+
+  test('respects a custom day assignment (strength on the configured day)', () => {
+    expect(plan.weeks[0].sessions[2].title).toBe('Strength + stretch') // Wednesday, per DAYS
   })
 })
 
 describe('trainingPlanToEvents', () => {
   test('flattens every session into an owned, tagged event', () => {
-    const plan = buildTrainingPlan(START, RACE)
+    const plan = buildTrainingPlan(baseProfile())
     const events = trainingPlanToEvents(plan, 'user-123')
 
     expect(events).toHaveLength(11 * 7)
