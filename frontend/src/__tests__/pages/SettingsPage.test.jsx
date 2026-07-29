@@ -25,18 +25,24 @@ describe('SettingsPage', () => {
     renderSettings()
     await screen.findByText('ABC123')
 
-    // window.location.href is an accessor on jsdom's Location — spy on the
-    // setter so clicking the button doesn't attempt a real navigation.
-    const hrefSetter = vi.fn()
-    Object.defineProperty(window.location, 'href', { set: hrefSetter, configurable: true })
+    // jsdom's window.location.href is a non-configurable accessor, so
+    // redefining just the `href` property throws "Cannot redefine
+    // property". Swapping out window.location itself (a plain, writable
+    // property on window) for a plain object is the standard workaround.
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: { ...originalLocation, href: '' },
+    })
 
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Send by email' }))
 
-    expect(hrefSetter).toHaveBeenCalledTimes(1)
-    const [mailtoUrl] = hrefSetter.mock.calls[0]
-    expect(mailtoUrl).toMatch(/^mailto:\?subject=/)
-    expect(decodeURIComponent(mailtoUrl)).toContain('ABC123')
+    expect(window.location.href).toMatch(/^mailto:\?subject=/)
+    expect(decodeURIComponent(window.location.href)).toContain('ABC123')
+
+    Object.defineProperty(window, 'location', { writable: true, configurable: true, value: originalLocation })
   })
 
   test('shows family members, marking the signed-in user as "you"', async () => {

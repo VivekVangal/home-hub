@@ -55,11 +55,23 @@ describe('computePhases', () => {
     expect(phases.taper).toBe(2)
   })
 
-  test('never produces a phase shorter than 1 week, even on a very short runway', () => {
-    const phases = computePhases('2026-08-03', '2026-08-16') // 2 weeks total
-    expect(phases.totalWeeks).toBe(2)
+  test('gives every phase at least 1 week when there is enough runway for all three', () => {
+    const phases = computePhases('2026-08-03', '2026-08-23') // 3 weeks total - the minimum for 3 phases of >= 1 week
+    expect(phases.totalWeeks).toBe(3)
     expect(phases.base + phases.build + phases.taper).toBe(phases.totalWeeks)
     expect(Math.min(phases.base, phases.build, phases.taper)).toBeGreaterThanOrEqual(1)
+  })
+
+  test('degrades gracefully when there is not enough runway for three full phases', () => {
+    // 2 weeks can't give base/build/taper >= 1 week each (that needs >= 3
+    // weeks minimum) - taper correctly drops to 0 rather than going negative
+    // or stealing weeks that don't exist.
+    const phases = computePhases('2026-08-03', '2026-08-16')
+    expect(phases.totalWeeks).toBe(2)
+    expect(phases.base + phases.build + phases.taper).toBe(phases.totalWeeks)
+    expect(phases.base).toBeGreaterThanOrEqual(1)
+    expect(phases.build).toBeGreaterThanOrEqual(1)
+    expect(phases.taper).toBeGreaterThanOrEqual(0)
   })
 })
 
