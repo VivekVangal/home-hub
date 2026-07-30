@@ -13,6 +13,8 @@ Built with React + Vite + Firebase (Auth + Firestore), structured the same way a
 - **Groceries** (`/groceries`) — a list scoped to the current week (Mon–Sun). Adding/checking off items here is what shows up on the dashboard.
 - **Tasks** (`/tasks`) — two tabs: **Maintenance** (recurring upkeep like HVAC filters, gutter cleaning, with due dates and repeat intervals) and **To-dos** (anything else). Completing a recurring maintenance task automatically creates the next occurrence. Same Combined/individual filter as the calendar.
 - **Settings** (`/settings`) — your family's invite code (to bring in more members), plus rename/recolor/remove for existing members.
+- **Training** (`/training`) — a form-driven training-plan generator (any race, distance, and goal time — not hardcoded to one race), which appends sessions to your calendar. Private by design: your training plan and prep to-dos are hidden from everyone else's Combined view, and your training profile (goals, injury notes) is locked to your own account at the Firestore rules level. Optionally connect **Strava** or **Terra** (Garmin, Apple Health, Fitbit, Oura, and others) to auto-fill actual distance/time/pace on completed sessions — see "Fitness data sync" below for setup.
+- **Ideas** (`/ideas`) — a lightweight backlog for product ideas and home-automation ideas you want to track and eventually build.
 - **Real-time sync** — changes made on one device show up on another within a second or two (Firestore listeners), not just on next page load.
 
 ## Setup: the fast way
@@ -81,6 +83,24 @@ This creates the `home-hub-family-dev` project, walks you through enabling Auth 
 - **`.firebaserc`** has both project aliases (`dev`, `prod`) — e.g. `firebase deploy --project dev` from your terminal targets the dev project explicitly.
 
 Regular deploys (hosting or Firestore rules/indexes) never delete Firestore documents on their own — if data ever seemed to disappear after a deploy, the likely cause was local testing running against the same project as production, which this split eliminates going forward.
+
+## Fitness data sync (Strava + Terra)
+
+Both are optional — the Training page works fine without either, just without auto-filled actual distance/time/pace. Both need the Blaze plan (Cloud Functions don't run on Spark).
+
+**Strava** — good if it's just you:
+1. Register an API app at https://www.strava.com/settings/api, with callback domain set to your Firebase Hosting domain (e.g. `home-hub-family-dev.web.app`).
+2. Add `VITE_STRAVA_CLIENT_ID` as a GitHub Actions secret (repo secret, or the `development`/`production` Environment).
+3. `firebase functions:secrets:set STRAVA_CLIENT_SECRET --project <your-project-id>`.
+4. Deploy the functions (`firebase deploy --only functions`, or just push — CI does it). Strava only allows one callback domain per app, so dev and prod need separate Strava apps if you want both connected.
+
+**Terra** — better if multiple people use different platforms (Garmin, Apple Health, Fitbit, Oura, Whoop, etc.):
+1. Sign up at https://tryterra.co and get a `dev-id` + API key from the dashboard.
+2. Set three Firebase Function secrets: `firebase functions:secrets:set TERRA_API_KEY --project <your-project-id>`, then the same for `TERRA_DEV_ID` and `TERRA_SIGNING_SECRET` (the signing secret comes from Terra's Destinations/Webhooks page — you'll generate it when adding a webhook destination in step 4).
+3. Deploy the functions (`firebase deploy --only functions`, or push and let CI do it) — this creates the `terraWebhook` HTTPS endpoint.
+4. In the Terra dashboard, add a Webhook destination pointing at your deployed `terraWebhook` function's URL (find it with `firebase functions:list` or in the Cloud Functions console after deploying).
+
+No frontend env var is needed for Terra — unlike Strava's `client_id`, Terra's `dev-id` is only ever used server-side inside the Cloud Function.
 
 ## Run it locally
 

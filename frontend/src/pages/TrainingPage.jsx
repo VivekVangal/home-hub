@@ -12,6 +12,7 @@ import { functions } from '../firebase.js'
 import { todayISO, addDaysISO, formatDisplayDate } from '../utils/dates.js'
 import { buildTrainingPlan, trainingPlanToEvents, nextMondayISO } from '../lib/trainingPlan.js'
 import { buildStravaAuthorizeUrl, formatStravaSummary } from '../lib/strava.js'
+import { formatTerraSummary } from '../lib/terra.js'
 import TrainingPlanForm from '../components/TrainingPlanForm.jsx'
 
 const PHASE_LABEL = { base: 'Base building', build: 'Build', taper: 'Taper' }
@@ -19,6 +20,7 @@ const PHASE_LABEL = { base: 'Base building', build: 'Build', taper: 'Taper' }
 function SessionRow({ session, onSetStatus }) {
   const status = session.sessionStatus
   const stravaSummary = formatStravaSummary(session)
+  const terraSummary = formatTerraSummary(session)
   return (
     <div className="list-item">
       <div className="list-item-main">
@@ -30,6 +32,9 @@ function SessionRow({ session, onSetStatus }) {
         </div>
         {stravaSummary && (
           <div className="list-item-sub" style={{ color: 'var(--accent)' }}>Synced via Strava: {stravaSummary}</div>
+        )}
+        {terraSummary && (
+          <div className="list-item-sub" style={{ color: 'var(--accent)' }}>Synced via Terra: {terraSummary}</div>
         )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
@@ -115,6 +120,9 @@ export default function TrainingPage() {
   const [connectingStrava, setConnectingStrava] = useState(false)
   const [syncingStrava, setSyncingStrava] = useState(false)
   const [stravaStatus, setStravaStatus] = useState(null)
+  const [connectingTerra, setConnectingTerra] = useState(false)
+  const [syncingTerra, setSyncingTerra] = useState(false)
+  const [terraStatus, setTerraStatus] = useState(null)
 
   // Strava redirects back to this exact page with ?code=... after the user
   // approves access — exchange it for tokens server-side (the client secret
@@ -207,6 +215,46 @@ export default function TrainingPage() {
     }
   }
 
+  // Terra's connect flow is entirely hosted (see lib/terra.js's header
+  // comment): fetch a one-time widget URL from the Cloud Function, then
+  // redirect the browser there. Terra itself handles the provider picker
+  // and auth; the result reaches us later via terraWebhook, not a URL
+  // parameter here, so there's no equivalent to Strava's ?code= handling.
+  const handleConnectTerra = async () => {
+    setConnectingTerra(true)
+    setTerraStatus(null)
+    try {
+      const { data } = await httpsCallable(functions, 'terraGenerateWidgetSession')({
+        redirectUrl: `${window.location.origin}/training`,
+      })
+      window.location.href = data.url
+    } catch (err) {
+      setTerraStatus(`Couldn't start Terra connection: ${err.message}`)
+      setConnectingTerra(false)
+    }
+  }
+
+  const handleSyncTerra = async () => {
+    setSyncingTerra(true)
+    setTerraStatus(null)
+    try {
+      const { data } = await httpsCallable(functions, 'terraSync')()
+      if (data.processing) {
+        setTerraStatus("Terra is still fetching your data — try syncing again in a moment.")
+      } else {
+        setTerraStatus(
+          data.matchedCount === 0
+            ? 'Synced — no new activities matched a scheduled session.'
+            : `Synced — ${data.matchedCount} run${data.matchedCount === 1 ? '' : 's'} matched.`
+        )
+      }
+    } catch (err) {
+      setTerraStatus(`Sync failed: ${err.message}`)
+    } finally {
+      setSyncingTerra(false)
+    }
+  }
+
   const loading = eventsLoading || profileLoading
 
   return (
@@ -251,6 +299,24 @@ export default function TrainingPage() {
               {stravaStatus && (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
                   {stravaStatus}
+                </p>
+              )}
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              {connectingTerra ? (
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Connecting to Terra…</span>
+              ) : profile.terraConnected ? (
+                <button className="btn" onClick={handleSyncTerra} disabled={syncingTerra}>
+                  {syncingTerra ? 'Syncing…' : 'Sync with Terra'}
+                </button>
+              ) : (
+                <button className="btn" onClick={handleConnectTerra}>
+                  Connect via Terra (Garmin, Apple Health, Fitbit, Oura…)
+                </button>
+              )}
+              {terraStatus && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
+                  {terraStatus}
                 </p>
               )}
             </div>
