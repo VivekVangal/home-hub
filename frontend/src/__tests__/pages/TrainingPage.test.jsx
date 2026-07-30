@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 import TrainingPage from '../../pages/TrainingPage.jsx'
 import { saveTrainingProfile } from '../../db.js'
+import { nextMondayISO } from '../../lib/trainingPlan.js'
+import { todayISO } from '../../utils/dates.js'
 import { setCallableHandler } from '../../test/mocks/functionsMock.js'
 import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
 
@@ -187,5 +189,53 @@ describe('TrainingPage', () => {
     expect(window.location.href).toBe('https://widget.tryterra.co/session/abc123')
 
     Object.defineProperty(window, 'location', { writable: true, configurable: true, value: originalLocation })
+  })
+
+  test('"Generate Apple Health webhook URL" shows the returned URL', async () => {
+    await setupSignedInFamily()
+    renderTraining()
+    await screen.findByText('Build your training plan')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
+    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
+
+    const webhookUrl = 'https://us-central1-home-hub-family-dev.cloudfunctions.net/appleHealthWebhook?token=abc123'
+    setCallableHandler('generateAppleHealthWebhookUrl', () => ({ url: webhookUrl }))
+    await user.click(screen.getByRole('button', { name: 'Generate Apple Health webhook URL' }))
+
+    expect(await screen.findByLabelText('Apple Health webhook URL')).toHaveValue(webhookUrl)
+  })
+
+  test('importing a Garmin CSV previews matches and applies them to the scheduled session', async () => {
+    await setupSignedInFamily()
+    renderTraining()
+    await screen.findByText('Build your training plan')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
+    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
+
+    // A freshly generated plan always has a session on the first Monday it
+    // covers, regardless of what type of session it is — Garmin import
+    // matching (like Strava/Terra) is by date only, not by session title.
+    const sessionDate = nextMondayISO(todayISO())
+    const csv = [
+      'Activity Type,Date,Title,Distance,Time',
+      `Running,${sessionDate},Morning Run,3.10,28:30`,
+    ].join('\n')
+    const file = new File([csv], 'activities.csv', { type: 'text/csv' })
+    // jsdom's File/Blob in this environment doesn't implement .text() —
+    // TrainingPage.jsx relies on the standard File API, so patch it here
+    // rather than work around a real browser capability in app code.
+    file.text = async () => csv
+    await user.upload(screen.getByLabelText('Import Garmin CSV'), file)
+
+    expect(await screen.findByText('Found 1 running activity in the file, 1 matched to a scheduled session.')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Apply import' }))
+
+    expect(await screen.findByText('Imported — 1 run matched.')).toBeInTheDocument()
+    expect(await screen.findByText('Imported from Garmin: 3.1 mi in 28:30 (9:11/mi)')).toBeInTheDocument()
   })
 })
