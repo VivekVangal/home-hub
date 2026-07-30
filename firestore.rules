@@ -33,6 +33,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Apple Health webhook tokens — maps an unguessable per-user token to
+    // { uid, familyId }, the same "get instead of query" pattern as
+    // inviteCodes above. Never read or written by the client directly; only
+    // the generateAppleHealthWebhookUrl/appleHealthWebhook Cloud Functions
+    // (Admin SDK, which bypasses these rules) touch this collection.
+    match /appleHealthTokens/{token} {
+      allow read, write: if false;
+    }
+
     match /families/{familyId} {
       // Members-only. Nobody outside a family — not even another signed-in
       // Home Hub user — can read its name, owner, or invite code unless

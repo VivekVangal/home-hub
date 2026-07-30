@@ -193,6 +193,23 @@ export async function deleteUpcomingTrainingPlan(fromDateISO) {
   notifyChange('events')
 }
 
+// Batch-applies a set of { id, fields } updates onto existing events — used
+// by the Garmin CSV import flow (see lib/garminImport.js) to write matched
+// activities onto their training sessions in one write, same batching
+// approach as addTrainingPlan above. No Cloud Function involved: this is a
+// normal client-side Firestore write, since a CSV file the user already has
+// on their computer doesn't need a server in the middle.
+export async function applyImportedSessions(updates) {
+  if (!currentFamilyId || !updates.length) return
+  const familyId = currentFamilyId
+  const batch = writeBatch(db)
+  updates.forEach(({ id, fields }) => {
+    batch.update(doc(db, 'families', familyId, 'events', id), fields)
+  })
+  await batch.commit()
+  notifyChange('events')
+}
+
 // ===================== TRAINING PROFILES (per-user, private) ================
 // Shape: { raceName, raceDateISO, raceDistanceMiles, targetTimeMinutes,
 //          recentRaceDistanceMiles, recentRaceTimeMinutes, currentWeeklyMileage,

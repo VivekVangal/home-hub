@@ -13,7 +13,7 @@ Built with React + Vite + Firebase (Auth + Firestore), structured the same way a
 - **Groceries** (`/groceries`) — a list scoped to the current week (Mon–Sun). Adding/checking off items here is what shows up on the dashboard.
 - **Tasks** (`/tasks`) — two tabs: **Maintenance** (recurring upkeep like HVAC filters, gutter cleaning, with due dates and repeat intervals) and **To-dos** (anything else). Completing a recurring maintenance task automatically creates the next occurrence. Same Combined/individual filter as the calendar.
 - **Settings** (`/settings`) — your family's invite code (to bring in more members), plus rename/recolor/remove for existing members.
-- **Training** (`/training`) — a form-driven training-plan generator (any race, distance, and goal time — not hardcoded to one race), which appends sessions to your calendar. Private by design: your training plan and prep to-dos are hidden from everyone else's Combined view, and your training profile (goals, injury notes) is locked to your own account at the Firestore rules level. Optionally connect **Strava** or **Terra** (Garmin, Apple Health, Fitbit, Oura, and others) to auto-fill actual distance/time/pace on completed sessions — see "Fitness data sync" below for setup.
+- **Training** (`/training`) — a form-driven training-plan generator (any race, distance, and goal time — not hardcoded to one race), which appends sessions to your calendar. Private by design: your training plan and prep to-dos are hidden from everyone else's Combined view, and your training profile (goals, injury notes) is locked to your own account at the Firestore rules level. Optionally connect **Strava**, **Apple Health**, or import a **Garmin** CSV export to auto-fill actual distance/time/pace on completed sessions — see "Fitness data sync" below for setup.
 - **Ideas** (`/ideas`) — a lightweight backlog for product ideas and home-automation ideas you want to track and eventually build.
 - **Real-time sync** — changes made on one device show up on another within a second or two (Firestore listeners), not just on next page load.
 
@@ -84,23 +84,28 @@ This creates the `home-hub-family-dev` project, walks you through enabling Auth 
 
 Regular deploys (hosting or Firestore rules/indexes) never delete Firestore documents on their own — if data ever seemed to disappear after a deploy, the likely cause was local testing running against the same project as production, which this split eliminates going forward.
 
-## Fitness data sync (Strava + Terra)
+## Fitness data sync (Strava, Apple Health, Garmin)
 
-Both are optional — the Training page works fine without either, just without auto-filled actual distance/time/pace. Both need the Blaze plan (Cloud Functions don't run on Spark).
+All optional — the Training page works fine without any of them, just without auto-filled actual distance/time/pace.
 
-**Strava** — good if it's just you:
+> **Note on Terra:** an earlier version of this app integrated [Terra](https://tryterra.co) as a single aggregator covering Garmin/Fitbit/Apple Health/Oura/Whoop/etc. The code is still in the repo (`functions/terra.js`, `lib/terra.js`) but was never activated — Terra's actual pricing starts at $399-499/month with no free tier, which doesn't make sense here. Use Strava/Apple Health/Garmin below instead.
+
+**Strava** — good if it's just you. Needs the Blaze plan (Cloud Functions don't run on Spark):
 1. Register an API app at https://www.strava.com/settings/api, with callback domain set to your Firebase Hosting domain (e.g. `home-hub-family-dev.web.app`).
 2. Add `VITE_STRAVA_CLIENT_ID` as a GitHub Actions secret (repo secret, or the `development`/`production` Environment).
 3. `firebase functions:secrets:set STRAVA_CLIENT_SECRET --project <your-project-id>`.
 4. Deploy the functions (`firebase deploy --only functions`, or just push — CI does it). Strava only allows one callback domain per app, so dev and prod need separate Strava apps if you want both connected.
 
-**Terra** — better if multiple people use different platforms (Garmin, Apple Health, Fitbit, Oura, Whoop, etc.):
-1. Sign up at https://tryterra.co and get a `dev-id` + API key from the dashboard.
-2. Set three Firebase Function secrets: `firebase functions:secrets:set TERRA_API_KEY --project <your-project-id>`, then the same for `TERRA_DEV_ID` and `TERRA_SIGNING_SECRET` (the signing secret comes from Terra's Destinations/Webhooks page — you'll generate it when adding a webhook destination in step 4).
-3. Deploy the functions (`firebase deploy --only functions`, or push and let CI do it) — this creates the `terraWebhook` HTTPS endpoint.
-4. In the Terra dashboard, add a Webhook destination pointing at your deployed `terraWebhook` function's URL (find it with `firebase functions:list` or in the Cloud Functions console after deploying).
+**Apple Health** — free, and the only real option for Apple users since Apple has no fitness API at all. No dashboard signup, no secrets to set — just deploy the functions once (`firebase deploy --only functions`, or push and let CI do it), then on the Training page click **Generate Apple Health webhook URL** and copy it. In the iOS **Shortcuts** app:
+1. Automation tab → **+** → Personal Automation → **Workout** (or "Health Data Changed" if your iOS version doesn't offer Workout directly) → choose "Is Added."
+2. Add action **Get Details of Health Sample** (or **Get Health Sample**, depending on iOS version) to pull the workout's type, start/end time, and distance.
+3. Add a **Text** action that builds a small JSON object from those variables, shaped like: `{"workoutType": "Running", "startDate": "2026-08-01T06:15:00Z", "endDate": "2026-08-01T06:45:00Z", "distanceMiles": 3.1}` (Shortcuts lets you insert each variable into the Text field).
+4. Add **Get Contents of URL** — paste the webhook URL, method **POST**, Request Body → **JSON** → the Text action from step 3.
+5. Turn off "Ask Before Running" so it fires automatically. Run a real workout to test it, then check the Training page for the synced result.
 
-No frontend env var is needed for Terra — unlike Strava's `client_id`, Terra's `dev-id` is only ever used server-side inside the Cloud Function.
+The webhook URL is shown once and never stored anywhere you can read it back — if you lose it, click **Regenerate webhook URL** and update the Shortcut with the new one (the old URL stops working immediately).
+
+**Garmin** — no live connection (Garmin's developer program is business-approval-only), so this is a manual import instead: in Garmin Connect, go to Activities → Export CSV, then on the Training page use **Import Garmin CSV** and upload it. Set your Garmin account's display units to miles first (Garmin Connect → account settings) — the CSV doesn't include a units column, so distances import as whatever unit your account was displaying in.
 
 ## Run it locally
 

@@ -6,13 +6,16 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useLiveData } from '../hooks/useLiveData.js'
 import {
   getEvents, getTrainingProfile, saveTrainingProfile, addTrainingPlan, deleteUpcomingTrainingPlan, updateEvent,
-  getTasks, addTask, updateTask, deleteTask, completeTask,
+  getTasks, addTask, updateTask, deleteTask, completeTask, applyImportedSessions,
 } from '../db.js'
 import { functions } from '../firebase.js'
 import { todayISO, addDaysISO, formatDisplayDate } from '../utils/dates.js'
 import { buildTrainingPlan, trainingPlanToEvents, nextMondayISO } from '../lib/trainingPlan.js'
 import { buildStravaAuthorizeUrl, formatStravaSummary } from '../lib/strava.js'
 import { formatTerraSummary } from '../lib/terra.js'
+import { formatAppleHealthSummary } from '../lib/appleHealth.js'
+import { formatGarminSummary } from '../lib/garmin.js'
+import { parseGarminActivitiesCsv, matchGarminActivitiesToSessions, garminActivityToSessionFields } from '../lib/garminImport.js'
 import TrainingPlanForm from '../components/TrainingPlanForm.jsx'
 
 const PHASE_LABEL = { base: 'Base building', build: 'Build', taper: 'Taper' }
@@ -21,6 +24,8 @@ function SessionRow({ session, onSetStatus }) {
   const status = session.sessionStatus
   const stravaSummary = formatStravaSummary(session)
   const terraSummary = formatTerraSummary(session)
+  const appleHealthSummary = formatAppleHealthSummary(session)
+  const garminSummary = formatGarminSummary(session)
   return (
     <div className="list-item">
       <div className="list-item-main">
@@ -35,6 +40,12 @@ function SessionRow({ session, onSetStatus }) {
         )}
         {terraSummary && (
           <div className="list-item-sub" style={{ color: 'var(--accent)' }}>Synced via Terra: {terraSummary}</div>
+        )}
+        {appleHealthSummary && (
+          <div className="list-item-sub" style={{ color: 'var(--accent)' }}>Synced via Apple Health: {appleHealthSummary}</div>
+        )}
+        {garminSummary && (
+          <div className="list-item-sub" style={{ color: 'var(--accent)' }}>Imported from Garmin: {garminSummary}</div>
         )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
@@ -123,6 +134,12 @@ export default function TrainingPage() {
   const [connectingTerra, setConnectingTerra] = useState(false)
   const [syncingTerra, setSyncingTerra] = useState(false)
   const [terraStatus, setTerraStatus] = useState(null)
+  const [generatingAppleHealthUrl, setGeneratingAppleHealthUrl] = useState(false)
+  const [appleHealthUrl, setAppleHealthUrl] = useState(null)
+  const [appleHealthStatus, setAppleHealthStatus] = useState(null)
+  const [garminPreview, setGarminPreview] = useState(null)
+  const [applyingGarminImport, setApplyingGarminImport] = useState(false)
+  const [garminStatus, setGarminStatus] = useState(null)
 
   // Strava redirects back to this exact page with ?code=... after the user
   // approves access — exchange it for tokens server-side (the client secret
@@ -255,6 +272,57 @@ export default function TrainingPage() {
     }
   }
 
+  // Apple Health has no cloud login to redirect to — this just asks the
+  // Cloud Function to mint a fresh token and returns a ready-to-paste
+  // webhook URL for a personal Shortcuts automation (see README.md for the
+  // exact steps). The URL is only ever shown here, once, since it's never
+  // persisted anywhere client-readable (see functions/index.js).
+  const handleGenerateAppleHealthUrl = async () => {
+    setGeneratingAppleHealthUrl(true)
+    setAppleHealthStatus(null)
+    try {
+      const { data } = await httpsCallable(functions, 'generateAppleHealthWebhookUrl')()
+      setAppleHealthUrl(data.url)
+    } catch (err) {
+      setAppleHealthStatus(`Couldn't generate a webhook URL: ${err.message}`)
+    } finally {
+      setGeneratingAppleHealthUrl(false)
+    }
+  }
+
+  // Garmin has no API to call at all — this just parses a CSV the user
+  // already exported from Garmin Connect and previews which rows match a
+  // scheduled session, entirely client-side (see lib/garminImport.js).
+  const handleGarminFileSelected = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // lets the same file be re-selected later if needed
+    if (!file) return
+    setGarminStatus(null)
+    const text = await file.text()
+    const activities = parseGarminActivitiesCsv(text)
+    const matches = matchGarminActivitiesToSessions(activities, trainingEvents)
+    setGarminPreview({ activityCount: activities.length, matches })
+  }
+
+  const handleApplyGarminImport = async () => {
+    if (!garminPreview) return
+    setApplyingGarminImport(true)
+    try {
+      await applyImportedSessions(
+        garminPreview.matches.map(({ session, activity }) => ({
+          id: session.id,
+          fields: garminActivityToSessionFields(activity),
+        }))
+      )
+      setGarminStatus(`Imported — ${garminPreview.matches.length} run${garminPreview.matches.length === 1 ? '' : 's'} matched.`)
+      setGarminPreview(null)
+    } catch (err) {
+      setGarminStatus(`Import failed: ${err.message}`)
+    } finally {
+      setApplyingGarminImport(false)
+    }
+  }
+
   const loading = eventsLoading || profileLoading
 
   return (
@@ -317,6 +385,69 @@ export default function TrainingPage() {
               {terraStatus && (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
                   {terraStatus}
+                </p>
+              )}
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>Apple Health</div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginBottom: 8 }}>
+                No cloud login for Apple Health — instead, generate a private URL below and point a personal Shortcuts
+                automation at it so it POSTs each run automatically. See README.md for the exact Shortcuts steps.
+              </p>
+              <button className="btn" onClick={handleGenerateAppleHealthUrl} disabled={generatingAppleHealthUrl}>
+                {generatingAppleHealthUrl
+                  ? 'Generating…'
+                  : profile.appleHealthConnected
+                    ? 'Regenerate webhook URL'
+                    : 'Generate Apple Health webhook URL'}
+              </button>
+              {appleHealthUrl && (
+                <div style={{ marginTop: 8 }}>
+                  <input
+                    readOnly
+                    value={appleHealthUrl}
+                    onFocus={(e) => e.target.select()}
+                    style={{ width: '100%', fontSize: '0.78rem' }}
+                    aria-label="Apple Health webhook URL"
+                  />
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 6, marginBottom: 0 }}>
+                    Copy this now — it won't be shown again after you leave this page (regenerating replaces it, which
+                    breaks any Shortcut already using the old one).
+                  </p>
+                </div>
+              )}
+              {appleHealthStatus && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
+                  {appleHealthStatus}
+                </p>
+              )}
+            </div>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>Garmin (manual import)</div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginBottom: 8 }}>
+                No live Garmin connection — Garmin's API requires business approval. Instead: Garmin Connect →
+                Activities → export as CSV, then import it here. Set your Garmin account's display units to miles
+                first, or distances will be off.
+              </p>
+              <input type="file" accept=".csv" onChange={handleGarminFileSelected} aria-label="Import Garmin CSV" />
+              {garminPreview && (
+                <div style={{ marginTop: 8 }}>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginBottom: 8 }}>
+                    Found {garminPreview.activityCount} running activit{garminPreview.activityCount === 1 ? 'y' : 'ies'} in
+                    the file, {garminPreview.matches.length} matched to a scheduled session.
+                  </p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleApplyGarminImport}
+                    disabled={applyingGarminImport || garminPreview.matches.length === 0}
+                  >
+                    {applyingGarminImport ? 'Importing…' : 'Apply import'}
+                  </button>
+                </div>
+              )}
+              {garminStatus && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
+                  {garminStatus}
                 </p>
               )}
             </div>

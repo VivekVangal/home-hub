@@ -18,6 +18,12 @@ import {
   activityToSessionFields as terraActivityToSessionFields,
   verifyTerraWebhookSignature,
 } from './terra.js'
+import {
+  generateWebhookToken,
+  isPlausibleToken,
+  appleHealthToSessionFields,
+  findMatchingSession as findMatchingAppleHealthSession,
+} from './appleHealth.js'
 
 initializeApp()
 const db = getFirestore()
@@ -313,6 +319,82 @@ export const terraWebhook = onRequest({ secrets: [terraSigningSecret] }, async (
     res.status(200).send('ok')
   } catch (err) {
     console.error('terraWebhook error', err)
+    res.status(500).send('error')
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Apple Health - unlike Strava/Terra, there's no cloud account to
+// authenticate against at all (HealthKit data lives on-device, and iCloud's
+// copy is end-to-end encrypted). So instead of OAuth, this is a one-time
+// generated URL containing a long random token: the user points a personal
+// Shortcuts automation at it, and it POSTs a workout as JSON after each run.
+// See functions/appleHealth.js for the payload shape and README.md for the
+// exact Shortcuts setup steps. No Firebase secrets needed for this one - the
+// token itself, stored in Firestore, is what stands in for a client secret.
+// ---------------------------------------------------------------------------
+
+export const generateAppleHealthWebhookUrl = onCall(async (request) => {
+  const uid = requireAuth(request)
+  const familyId = await resolveFamilyId(uid)
+
+  // Only one active webhook URL per person — mint a new token and invalidate
+  // whatever token they had before, so an old, possibly-shared URL stops
+  // working the moment a new one is generated.
+  const existing = await db.collection('appleHealthTokens').where('uid', '==', uid).get()
+  const batch = db.batch()
+  existing.forEach((d) => batch.delete(d.ref))
+
+  const token = generateWebhookToken()
+  batch.set(db.doc(`appleHealthTokens/${token}`), { uid, familyId, createdAt: Date.now() })
+  await batch.commit()
+
+  await db.doc(`families/${familyId}/trainingProfiles/${uid}`).set({ appleHealthConnected: true }, { merge: true })
+
+  // 2nd-gen onRequest functions are still reachable at this stable,
+  // region+project URL alongside their Cloud Run URL - see Firebase's
+  // Cloud Functions docs on 2nd-gen HTTPS URLs.
+  const region = 'us-central1'
+  const projectId = process.env.GCLOUD_PROJECT
+  return { url: `https://${region}-${projectId}.cloudfunctions.net/appleHealthWebhook?token=${token}` }
+})
+
+// HTTP (not callable) - a Shortcuts automation POSTs directly to this URL,
+// authenticated by the ?token= query param rather than a signature header
+// (there's no Apple-issued secret to verify against, since Apple isn't the
+// one calling this).
+export const appleHealthWebhook = onRequest(async (req, res) => {
+  const token = req.query.token
+  if (!isPlausibleToken(token)) {
+    res.status(401).send('Invalid or missing token')
+    return
+  }
+
+  const tokenSnap = await db.doc(`appleHealthTokens/${token}`).get()
+  if (!tokenSnap.exists) {
+    res.status(401).send('Unknown token')
+    return
+  }
+  const { uid, familyId } = tokenSnap.data()
+
+  const payload = req.body || {}
+  try {
+    const eventsSnap = await db
+      .collection(`families/${familyId}/events`)
+      .where('trainingPlan', '==', true)
+      .where('owner', '==', uid)
+      .get()
+    const sessions = eventsSnap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }))
+
+    const session = findMatchingAppleHealthSession(sessions, payload)
+    if (!session) {
+      res.status(200).send('ignored (not a running workout, or no matching scheduled session)')
+      return
+    }
+    await session.ref.update(appleHealthToSessionFields(payload))
+    res.status(200).send('ok')
+  } catch (err) {
+    console.error('appleHealthWebhook error', err)
     res.status(500).send('error')
   }
 })
