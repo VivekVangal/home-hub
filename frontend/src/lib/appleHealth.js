@@ -1,15 +1,15 @@
 // ---------------------------------------------------------------------------
 // Client-side Apple Health helper. There's no connect/OAuth flow here at
 // all — see functions/appleHealth.js's header comment for why — so unlike
-// strava.js/terra.js this file only has a summary formatter, not a connect
-// URL builder. The webhook URL itself is generated on demand by calling the
+// strava.js this file only has a summary formatter, not a connect URL
+// builder. The webhook URL itself is generated on demand by calling the
 // generateAppleHealthWebhookUrl Cloud Function directly from
 // pages/TrainingPage.jsx.
 // ---------------------------------------------------------------------------
 
 // One-line summary of a session's actual (Apple Health-synced) distance/
 // duration/pace, or null if it hasn't been matched to a workout yet. Mirrors
-// formatStravaSummary/formatTerraSummary — same underlying event fields,
+// formatStravaSummary — same underlying event fields,
 // just keyed off appleHealthImported instead of a provider activity id
 // (Apple Health workouts don't carry a stable id worth storing).
 export function formatAppleHealthSummary(event) {

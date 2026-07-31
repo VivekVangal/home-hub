@@ -118,79 +118,6 @@ describe('TrainingPage', () => {
     expect(await screen.findByText('Synced — 2 runs matched.')).toBeInTheDocument()
   })
 
-  test('shows "Connect via Terra" before connecting, and "Sync with Terra" once connected', async () => {
-    const { user: authUser } = await setupSignedInFamily()
-    renderTraining()
-    await screen.findByText('Build your training plan')
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
-    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
-
-    expect(screen.getByRole('button', { name: /Connect via Terra/ })).toBeInTheDocument()
-
-    await saveTrainingProfile(authUser.uid, { terraConnected: true })
-    expect(await screen.findByRole('button', { name: 'Sync with Terra' })).toBeInTheDocument()
-  })
-
-  test('"Sync with Terra" calls the sync function and shows a status message', async () => {
-    const { user: authUser } = await setupSignedInFamily()
-    renderTraining()
-    await screen.findByText('Build your training plan')
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
-    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
-    await saveTrainingProfile(authUser.uid, { terraConnected: true })
-    await screen.findByRole('button', { name: 'Sync with Terra' })
-
-    setCallableHandler('terraSync', () => ({ matchedCount: 1, activityCount: 1 }))
-    await user.click(screen.getByRole('button', { name: 'Sync with Terra' }))
-
-    expect(await screen.findByText('Synced — 1 run matched.')).toBeInTheDocument()
-  })
-
-  test('"Sync with Terra" surfaces a still-processing status without claiming zero activities', async () => {
-    const { user: authUser } = await setupSignedInFamily()
-    renderTraining()
-    await screen.findByText('Build your training plan')
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
-    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
-    await saveTrainingProfile(authUser.uid, { terraConnected: true })
-    await screen.findByRole('button', { name: 'Sync with Terra' })
-
-    setCallableHandler('terraSync', () => ({ processing: true, retryAfterSeconds: 30, matchedCount: 0, activityCount: 0 }))
-    await user.click(screen.getByRole('button', { name: 'Sync with Terra' }))
-
-    expect(await screen.findByText(/still fetching your data/)).toBeInTheDocument()
-  })
-
-  test('"Connect via Terra" redirects the browser to the generated widget URL', async () => {
-    await setupSignedInFamily()
-    renderTraining()
-    await screen.findByText('Build your training plan')
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
-    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
-
-    const originalLocation = window.location
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      configurable: true,
-      value: { ...originalLocation, href: '' },
-    })
-
-    setCallableHandler('terraGenerateWidgetSession', () => ({ url: 'https://widget.tryterra.co/session/abc123' }))
-    await user.click(screen.getByRole('button', { name: /Connect via Terra/ }))
-
-    expect(window.location.href).toBe('https://widget.tryterra.co/session/abc123')
-
-    Object.defineProperty(window, 'location', { writable: true, configurable: true, value: originalLocation })
-  })
-
   test('"Generate Apple Health webhook URL" shows the returned URL', async () => {
     await setupSignedInFamily()
     renderTraining()
@@ -218,7 +145,7 @@ describe('TrainingPage', () => {
 
     // A freshly generated plan always has a session on the first Monday it
     // covers, regardless of what type of session it is — Garmin import
-    // matching (like Strava/Terra) is by date only, not by session title.
+    // matching (like Strava) is by date only, not by session title.
     const sessionDate = nextMondayISO(todayISO())
     const csv = [
       'Activity Type,Date,Title,Distance,Time',

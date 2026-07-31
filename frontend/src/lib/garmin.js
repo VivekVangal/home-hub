@@ -1,7 +1,7 @@
-// Display helper for Garmin-imported sessions — mirrors formatStravaSummary/
-// formatTerraSummary/formatAppleHealthSummary. Kept separate from
-// garminImport.js (the CSV parsing/matching logic) the same way Terra
-// splits its connect-flow file (lib/terra.js) from anything more mechanical.
+// Display helper for Garmin-imported sessions — mirrors
+// formatStravaSummary/formatAppleHealthSummary. Kept separate from
+// garminImport.js (the CSV parsing/matching logic) the same way Strava
+// splits its connect-flow helpers (lib/strava.js) from anything more mechanical.
 
 export function formatGarminSummary(event) {
   if (!event.garminImported) return null

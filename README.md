@@ -88,8 +88,6 @@ Regular deploys (hosting or Firestore rules/indexes) never delete Firestore docu
 
 All optional — the Training page works fine without any of them, just without auto-filled actual distance/time/pace.
 
-> **Note on Terra:** an earlier version of this app integrated [Terra](https://tryterra.co) as a single aggregator covering Garmin/Fitbit/Apple Health/Oura/Whoop/etc. The code is still in the repo (`functions/terra.js`, `lib/terra.js`) but was never activated — Terra's actual pricing starts at $399-499/month with no free tier, which doesn't make sense here. Use Strava/Apple Health/Garmin below instead.
-
 **Strava** — good if it's just you. Needs the Blaze plan (Cloud Functions don't run on Spark):
 1. Register an API app at https://www.strava.com/settings/api, with callback domain set to your Firebase Hosting domain (e.g. `home-hub-family-dev.web.app`).
 2. Add `VITE_STRAVA_CLIENT_ID` as a GitHub Actions secret (repo secret, or the `development`/`production` Environment).

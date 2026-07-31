@@ -13,12 +13,6 @@ import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { STRAVA_TOKEN_URL, STRAVA_ACTIVITIES_URL, matchActivitiesToSessions, activityToSessionFields } from './strava.js'
 import {
-  TERRA_API_BASE,
-  matchActivitiesToSessions as matchTerraActivitiesToSessions,
-  activityToSessionFields as terraActivityToSessionFields,
-  verifyTerraWebhookSignature,
-} from './terra.js'
-import {
   generateWebhookToken,
   isPlausibleToken,
   appleHealthToSessionFields,
@@ -30,10 +24,6 @@ const db = getFirestore()
 
 const stravaClientId = defineSecret('STRAVA_CLIENT_ID')
 const stravaClientSecret = defineSecret('STRAVA_CLIENT_SECRET')
-
-const terraApiKey = defineSecret('TERRA_API_KEY')
-const terraDevId = defineSecret('TERRA_DEV_ID')
-const terraSigningSecret = defineSecret('TERRA_SIGNING_SECRET')
 
 const SYNC_LOOKBACK_DAYS = 45
 
@@ -151,180 +141,7 @@ export const stravaSync = onCall({ secrets: [stravaClientId, stravaClientSecret]
 })
 
 // ---------------------------------------------------------------------------
-// Terra (tryterra.co) - unified wearable-data aggregator covering Garmin,
-// Fitbit, Apple Health, Oura, Whoop, Polar, Strava, and 500+ others through
-// one integration. Chosen over Garmin's own API (requires a legal-entity
-// business application) and over relying on Strava's direct API alone
-// (capped at 10 athletes on the free tier) - see TASKS.md for that research.
-//
-// Requires signing up at tryterra.co and setting three Firebase secrets
-// (`firebase functions:secrets:set TERRA_API_KEY` etc. - see README/TASKS.md):
-//   TERRA_API_KEY        - from the Terra dashboard's credentials section
-//   TERRA_DEV_ID          - from the same page (not secret, but kept alongside)
-//   TERRA_SIGNING_SECRET - from the Destinations/Webhooks section, used to
-//                          verify terraWebhook's requests actually came from Terra
-// and configuring a Webhook destination in the Terra dashboard pointing at
-// this function's deployed URL.
-// ---------------------------------------------------------------------------
-
-export const terraGenerateWidgetSession = onCall({ secrets: [terraApiKey, terraDevId] }, async (request) => {
-  const uid = requireAuth(request)
-  await resolveFamilyId(uid) // confirms this account actually belongs to a family before connecting anything
-
-  const redirectUrl = request.data?.redirectUrl
-  if (!redirectUrl) throw new HttpsError('invalid-argument', 'Missing redirectUrl.')
-
-  const res = await fetch(`${TERRA_API_BASE}/auth/generateWidgetSession`, {
-    method: 'POST',
-    headers: {
-      'dev-id': terraDevId.value(),
-      'x-api-key': terraApiKey.value(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      language: 'en',
-      reference_id: uid, // ties the resulting Terra User back to this Firebase account
-      auth_success_redirect_url: redirectUrl,
-      auth_failure_redirect_url: redirectUrl,
-    }),
-  })
-  if (!res.ok) throw new HttpsError('internal', `Terra widget session request failed: ${await res.text()}`)
-  const { url } = await res.json()
-  return { url }
-})
-
-export const terraSync = onCall({ secrets: [terraApiKey, terraDevId] }, async (request) => {
-  const uid = requireAuth(request)
-  const familyId = await resolveFamilyId(uid)
-
-  const profileSnap = await db.doc(`families/${familyId}/trainingProfiles/${uid}`).get()
-  const terraUserId = profileSnap.data()?.terraUserId
-  if (!terraUserId) throw new HttpsError('failed-precondition', 'Terra is not connected.')
-
-  const endDate = new Date()
-  const startDate = new Date(Date.now() - SYNC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
-  const params = new URLSearchParams({
-    user_id: terraUserId,
-    start_date: startDate.toISOString(),
-    end_date: endDate.toISOString(),
-    to_webhook: 'false',
-  })
-  const res = await fetch(`${TERRA_API_BASE}/activity?${params}`, {
-    headers: { 'dev-id': terraDevId.value(), 'x-api-key': terraApiKey.value() },
-  })
-  if (!res.ok) throw new HttpsError('internal', `Terra activity fetch failed: ${await res.text()}`)
-  const body = await res.json()
-
-  // Large/slow-to-fetch requests come back as a "processing" placeholder
-  // instead of data - tell the caller to try again shortly rather than
-  // silently reporting zero activities.
-  if (body.type === 'processing') {
-    return { processing: true, retryAfterSeconds: body.retry_after_seconds ?? 30, matchedCount: 0, activityCount: 0 }
-  }
-
-  const activities = body.data || []
-
-  const eventsSnap = await db
-    .collection(`families/${familyId}/events`)
-    .where('trainingPlan', '==', true)
-    .where('owner', '==', uid)
-    .get()
-  const sessions = eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
-
-  const matches = matchTerraActivitiesToSessions(activities, sessions)
-  if (matches.length) {
-    const batch = db.batch()
-    for (const { session, activity } of matches) {
-      batch.update(db.doc(`families/${familyId}/events/${session.id}`), terraActivityToSessionFields(activity))
-    }
-    await batch.commit()
-  }
-
-  return { matchedCount: matches.length, activityCount: activities.length }
-})
-
-async function handleTerraAuthEvent(user) {
-  const uid = user?.reference_id
-  if (!uid) return
-  const familyId = await resolveFamilyId(uid)
-  await db.doc(`families/${familyId}/trainingProfiles/${uid}`).set(
-    { terraConnected: true, terraUserId: user.user_id ?? null, terraProvider: user.provider ?? null },
-    { merge: true }
-  )
-}
-
-async function handleTerraDisconnectEvent(user) {
-  const uid = user?.reference_id
-  if (!uid) return
-  const familyId = await resolveFamilyId(uid)
-  await db.doc(`families/${familyId}/trainingProfiles/${uid}`).set({ terraConnected: false }, { merge: true })
-}
-
-async function handleTerraActivityEvent(user, activities) {
-  const uid = user?.reference_id
-  if (!uid || !activities?.length) return
-  const familyId = await resolveFamilyId(uid)
-
-  const eventsSnap = await db
-    .collection(`families/${familyId}/events`)
-    .where('trainingPlan', '==', true)
-    .where('owner', '==', uid)
-    .get()
-  const sessions = eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
-
-  const matches = matchTerraActivitiesToSessions(activities, sessions)
-  if (matches.length) {
-    const batch = db.batch()
-    for (const { session, activity } of matches) {
-      batch.update(db.doc(`families/${familyId}/events/${session.id}`), terraActivityToSessionFields(activity))
-    }
-    await batch.commit()
-  }
-}
-
-// HTTP (not callable) - Terra POSTs directly to this URL. Must verify the
-// `terra-signature` header against the raw request body before trusting
-// anything in it (see terra.js's verifyTerraWebhookSignature).
-export const terraWebhook = onRequest({ secrets: [terraSigningSecret] }, async (req, res) => {
-  const signature = req.get('terra-signature')
-  const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body)
-
-  if (!verifyTerraWebhookSignature(rawBody, signature, terraSigningSecret.value())) {
-    res.status(401).send('Invalid signature')
-    return
-  }
-
-  const payload = req.body || {}
-  try {
-    switch (payload.type) {
-      case 'auth':
-        await handleTerraAuthEvent(payload.user)
-        break
-      case 'user_reauth':
-        // Old connection's user_id is gone; the new one just needs the same
-        // handling as a fresh auth (same reference_id, since it's per-provider).
-        await handleTerraAuthEvent(payload.new_user)
-        break
-      case 'deauth':
-      case 'access_revoked':
-      case 'connection_error':
-        await handleTerraDisconnectEvent(payload.user)
-        break
-      case 'activity':
-        await handleTerraActivityEvent(payload.user, payload.data)
-        break
-      default:
-        break // healthcheck, processing, large_request_*, etc. - nothing to do
-    }
-    res.status(200).send('ok')
-  } catch (err) {
-    console.error('terraWebhook error', err)
-    res.status(500).send('error')
-  }
-})
-
-// ---------------------------------------------------------------------------
-// Apple Health - unlike Strava/Terra, there's no cloud account to
+// Apple Health - unlike Strava, there's no cloud account to
 // authenticate against at all (HealthKit data lives on-device, and iCloud's
 // copy is end-to-end encrypted). So instead of OAuth, this is a one-time
 // generated URL containing a long random token: the user points a personal

@@ -96,7 +96,7 @@ export function parseGarminActivitiesCsv(text) {
     .filter((a) => a.date && RUNNING_ACTIVITY_TYPES.has(a.activityType.toLowerCase()))
 }
 
-// Same matching strategy as Strava/Terra: one training session per day,
+// Same matching strategy as Strava: one training session per day,
 // first unmatched running activity on that date wins, sessions already
 // carrying garminImported are skipped. Returns [{ session, activity }].
 export function matchGarminActivitiesToSessions(activities, sessions) {
@@ -114,7 +114,7 @@ export function matchGarminActivitiesToSessions(activities, sessions) {
 
 // Converts a matched Garmin CSV row into the fields written onto its
 // training session event — same actualDistanceMiles/actualDurationMinutes/
-// actualPaceMinPerMile/sessionStatus convention as Strava/Terra/Apple Health.
+// actualPaceMinPerMile/sessionStatus convention as Strava/Apple Health.
 export function garminActivityToSessionFields(activity) {
   const pace = activity.distanceMiles != null && activity.durationMinutes != null
     ? activity.durationMinutes / activity.distanceMiles
