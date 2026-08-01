@@ -1,16 +1,21 @@
-import { describe, test, expect, vi } from 'vitest'
+import { describe, test, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
+import { doc, setDoc } from 'firebase/firestore'
 import SettingsPage from '../../pages/SettingsPage.jsx'
+import { db } from '../../firebase.js'
+import { setCallableHandler } from '../../test/mocks/functionsMock.js'
 import { AllProviders, setupSignedInFamily, seedMember } from '../../test/helpers.js'
 
-// SettingsPage now reads useAuth()/useFamily(), so it needs to render inside
-// a signed-in, family-having context — setupSignedInFamily() seeds that
-// state directly (same shape FamilyContext.createFamily produces) before
-// each render.
+// SettingsPage reads useAuth()/useFamily(), so it needs to render inside a
+// signed-in, family-having context — setupSignedInFamily() seeds that state
+// directly (same shape FamilyContext.createFamily produces) before each
+// render. It also uses useNavigate() (to clean up the ?code=... query param
+// after a Google OAuth redirect), which needs a Router context.
 
 function renderSettings() {
-  return render(<SettingsPage />, { wrapper: AllProviders })
+  return render(<MemoryRouter><SettingsPage /></MemoryRouter>, { wrapper: AllProviders })
 }
 
 describe('SettingsPage', () => {
@@ -97,5 +102,29 @@ describe('SettingsPage', () => {
 
     expect(screen.queryByText('Person 1')).not.toBeInTheDocument()
     expect(screen.getByText('You (you)')).toBeInTheDocument()
+  })
+
+  test('shows "Connect Google" before connecting, and "Sync Google" once connected', async () => {
+    const { user: authUser, familyId } = await setupSignedInFamily()
+    renderSettings()
+
+    const connectLink = await screen.findByRole('link', { name: 'Connect Google' })
+    expect(connectLink.getAttribute('href')).toMatch(/^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/)
+
+    await setDoc(doc(db, 'families', familyId, 'googleSync', authUser.uid), { connected: true })
+    expect(await screen.findByRole('button', { name: 'Sync Google' })).toBeInTheDocument()
+  })
+
+  test('"Sync Google" calls the sync function and shows a status message', async () => {
+    const { user: authUser, familyId } = await setupSignedInFamily()
+    await setDoc(doc(db, 'families', familyId, 'googleSync', authUser.uid), { connected: true })
+    renderSettings()
+    await screen.findByRole('button', { name: 'Sync Google' })
+
+    setCallableHandler('googleSync', () => ({ eventsImported: 3, tasksImported: 1 }))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Sync Google' }))
+
+    expect(await screen.findByText('Imported 3 events, 1 task.')).toBeInTheDocument()
   })
 })

@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { httpsCallable } from 'firebase/functions'
 import { usePeople } from '../hooks/usePeople.js'
+import { useLiveData } from '../hooks/useLiveData.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useFamily } from '../context/FamilyContext.jsx'
-import { updatePerson, deletePerson } from '../db.js'
+import { updatePerson, deletePerson, getGoogleSyncState } from '../db.js'
+import { functions } from '../firebase.js'
+import { buildGoogleAuthorizeUrl } from '../lib/google.js'
 import { COLOR_PALETTE } from '../consts.js'
 
 function PersonRow({ person, isSelf }) {
@@ -121,6 +126,81 @@ function InviteCard() {
   )
 }
 
+// General household import, not training-specific — unlike Strava/Apple
+// Health/Garmin (which live on the Training page and match against
+// scheduled sessions), there's nothing to match here, just a straight pull
+// of whatever's on the connecting user's Google account. Imported events/
+// tasks are marked `googleImported: true` and kept private to whoever
+// connected, same treatment as trainingPlan events (see CalendarPage.jsx/
+// HomePage.jsx/TasksPage.jsx filtering).
+function GoogleSyncCard() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const { data: googleSync } = useLiveData(() => getGoogleSyncState(user?.uid), [user?.uid])
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [status, setStatus] = useState(null)
+
+  // Google redirects back to this exact page with ?code=... after the user
+  // approves access — exchange it for tokens server-side (the client secret
+  // can never reach the browser, see functions/index.js), then drop the
+  // code from the URL so a page refresh doesn't try to reuse it. Same
+  // pattern as TrainingPage.jsx's Strava handling.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('code')
+    if (!code) return
+    setConnecting(true)
+    httpsCallable(functions, 'googleExchangeCode')({ code, redirectUri: `${window.location.origin}/settings` })
+      .catch((err) => setStatus(`Couldn't connect Google: ${err.message}`))
+      .finally(() => {
+        setConnecting(false)
+        navigate('/settings', { replace: true })
+      })
+  }, [navigate])
+
+  const handleSync = async () => {
+    setSyncing(true)
+    setStatus(null)
+    try {
+      const { data } = await httpsCallable(functions, 'googleSync')()
+      setStatus(
+        `Imported ${data.eventsImported} event${data.eventsImported === 1 ? '' : 's'}, ` +
+        `${data.tasksImported} task${data.tasksImported === 1 ? '' : 's'}.`
+      )
+    } catch (err) {
+      setStatus(`Sync failed: ${err.message}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="section-title">Connected accounts</div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: -6, marginBottom: 14 }}>
+        Import your Google Calendar events and Google Tasks into Home Hub. Imported items are private to
+        you — hidden from everyone else's Combined view, same as your training plan.
+      </p>
+      {connecting ? (
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Connecting Google…</span>
+      ) : googleSync?.connected ? (
+        <button className="btn" onClick={handleSync} disabled={syncing}>
+          {syncing ? 'Syncing…' : 'Sync Google'}
+        </button>
+      ) : (
+        <a className="btn" href={buildGoogleAuthorizeUrl(`${window.location.origin}/settings`)}>
+          Connect Google
+        </a>
+      )}
+      {status && (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
+          {status}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { people, loading } = usePeople()
   const { user } = useAuth()
@@ -130,6 +210,7 @@ export default function SettingsPage() {
       <h1 className="page-title">Settings</h1>
 
       <InviteCard />
+      <GoogleSyncCard />
 
       <div className="card">
         <div className="section-title">Family members</div>

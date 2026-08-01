@@ -21,10 +21,12 @@ export default function CalendarPage() {
   const days = viewMode === 'week' ? getWeekDays(weekStart) : [selectedDay]
   const rangeEvents = useMemo(
     () => (events || [])
-      // Training-plan sessions are private to whoever generated them — a
-      // deliberate exception to this app's normally shared-by-default
-      // calendar (see TrainingPage.jsx / docs/ARCHITECTURE.md).
+      // Training-plan sessions and imported Google Calendar events are both
+      // private to whoever they belong to — a deliberate exception to this
+      // app's normally shared-by-default calendar (see TrainingPage.jsx /
+      // SettingsPage.jsx / docs/ARCHITECTURE.md).
       .filter((e) => !e.trainingPlan || e.owner === user?.uid)
+      .filter((e) => !e.googleImported || e.owner === user?.uid)
       .filter((e) => days.includes(e.date)),
     [events, days, user]
   )

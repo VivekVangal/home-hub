@@ -95,6 +95,19 @@ service cloud.firestore {
       match /stravaTokens/{uid} {
         allow read, write: if false;
       }
+
+      // Google OAuth tokens (Calendar + Tasks import) — same deny-all,
+      // Admin-SDK-only pattern as stravaTokens above.
+      match /googleTokens/{uid} {
+        allow read, write: if false;
+      }
+
+      // Google Calendar/Tasks sync state (connected flags, last synced
+      // time) — self-only, same pattern as trainingProfiles. This is what
+      // SettingsPage.jsx actually reads; it never touches googleTokens.
+      match /googleSync/{uid} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
     }
   }
 }

@@ -53,7 +53,7 @@ function notifyChange(key) {
   window.dispatchEvent(new CustomEvent('homehub:change', { detail: { key } }))
 }
 
-const LISTENED_COLLECTIONS = ['members', 'events', 'groceries', 'tasks', 'trainingProfiles', 'ideas']
+const LISTENED_COLLECTIONS = ['members', 'events', 'groceries', 'tasks', 'trainingProfiles', 'ideas', 'googleSync']
 
 // Opens one onSnapshot listener per family-scoped collection. Returns an
 // unsubscribe function that tears all of them down (called by FamilyContext
@@ -231,6 +231,19 @@ export async function saveTrainingProfile(uid, data) {
   await setDoc(familyDoc('trainingProfiles', uid), { ...data, updatedAt: Date.now() }, { merge: true })
   notifyChange('trainingProfiles')
   return { id: uid, ...data }
+}
+
+// ===================== GOOGLE SYNC (Calendar + Tasks import) ================
+// Shape: { connected, lastSyncedAt } — per-user, self-only (same rule shape
+// as trainingProfiles). The actual OAuth tokens live in a separate
+// googleTokens/{uid} doc that the client never reads at all (see
+// functions/index.js) — this is just the derived connection state
+// SettingsPage.jsx displays.
+
+export async function getGoogleSyncState(uid) {
+  if (!currentFamilyId || !uid) return null
+  const snap = await getDoc(familyDoc('googleSync', uid))
+  return snap.exists() ? { id: uid, ...snap.data() } : null
 }
 
 // ===================== IDEAS (product ideas / home automations) =============

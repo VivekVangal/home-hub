@@ -16,15 +16,18 @@ export default function HomePage() {
   const { ownerById } = usePeople()
   const { user } = useAuth()
 
-  // Training-plan sessions are private to whoever generated them, even on
-  // the shared dashboard — see CalendarPage.jsx for the same rule.
+  // Training-plan sessions and imported Google Calendar events are both
+  // private to whoever they belong to, even on the shared dashboard — see
+  // CalendarPage.jsx for the same rule.
   const todayEvents = (events || [])
     .filter((e) => !e.trainingPlan || e.owner === user?.uid)
+    .filter((e) => !e.googleImported || e.owner === user?.uid)
     .filter((e) => e.date === today)
   const groceriesRemaining = (groceries || []).filter((g) => !g.checked)
-  // Training prep to-dos stay off the shared dashboard, same as trainingPlan
-  // events above — see TrainingPage.jsx.
-  const householdTasks = (tasks || []).filter((t) => !t.trainingTask)
+  // Training prep to-dos and imported Google Tasks both stay off the shared
+  // dashboard, same as trainingPlan events above — see TrainingPage.jsx /
+  // SettingsPage.jsx.
+  const householdTasks = (tasks || []).filter((t) => !t.trainingTask).filter((t) => !t.googleImported || t.owner === user?.uid)
   const overdueTasks = householdTasks.filter((t) => !t.done && t.dueDate && isPastDue(t.dueDate))
   const upcomingTasks = householdTasks
     .filter((t) => !t.done && t.dueDate && !isPastDue(t.dueDate))

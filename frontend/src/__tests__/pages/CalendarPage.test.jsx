@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CalendarPage from '../../pages/CalendarPage.jsx'
+import { addEvent } from '../../db.js'
+import { todayISO } from '../../utils/dates.js'
 import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
 
 // These exercise the "combined vs. individual" calendar requirement end to
@@ -102,5 +104,24 @@ describe('CalendarPage — individual vs combined views', () => {
 
     await user.click(screen.getByRole('button', { name: 'Week' }))
     expect(await screen.findByText('Tuesday event')).toBeInTheDocument()
+  })
+})
+
+describe('CalendarPage — Google Calendar import privacy', () => {
+  test('a googleImported event is visible in Combined view for its owner but hidden for everyone else', async () => {
+    const { user: authUser } = await setupSignedInFamily()
+    await addEvent({
+      title: "Someone else's Google event", date: todayISO(), owner: 'person-1',
+      googleImported: true, googleEventId: 'g1',
+    })
+    await addEvent({
+      title: 'My Google event', date: todayISO(), owner: authUser.uid,
+      googleImported: true, googleEventId: 'g2',
+    })
+    renderCalendar()
+    await screen.findByRole('button', { name: 'Combined' })
+
+    expect(await screen.findByText('My Google event')).toBeInTheDocument()
+    expect(screen.queryByText("Someone else's Google event")).not.toBeInTheDocument()
   })
 })

@@ -18,12 +18,24 @@ import {
   appleHealthToSessionFields,
   findMatchingSession as findMatchingAppleHealthSession,
 } from './appleHealth.js'
+import {
+  GOOGLE_TOKEN_URL,
+  GOOGLE_CALENDAR_EVENTS_URL,
+  GOOGLE_TASKS_URL,
+  calendarSyncWindow,
+  mapGoogleEventToFields,
+  mapGoogleTaskToFields,
+  planUpserts,
+} from './google.js'
 
 initializeApp()
 const db = getFirestore()
 
 const stravaClientId = defineSecret('STRAVA_CLIENT_ID')
 const stravaClientSecret = defineSecret('STRAVA_CLIENT_SECRET')
+
+const googleClientId = defineSecret('GOOGLE_CLIENT_ID')
+const googleClientSecret = defineSecret('GOOGLE_CLIENT_SECRET')
 
 const SYNC_LOOKBACK_DAYS = 45
 
@@ -213,5 +225,144 @@ export const appleHealthWebhook = onRequest(async (req, res) => {
   } catch (err) {
     console.error('appleHealthWebhook error', err)
     res.status(500).send('error')
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Google Calendar + Google Tasks import — general household import (whatever
+// the connecting user has on Google), not training-specific, so this powers
+// SettingsPage.jsx's "Connected accounts" card rather than the Training
+// page. Imported events/tasks are private to whoever connected (see the
+// googleImported filtering in CalendarPage.jsx/HomePage.jsx/TasksPage.jsx),
+// same treatment as trainingPlan events.
+//
+// Google's token endpoint wants application/x-www-form-urlencoded (not JSON
+// like Strava's), and — unlike Strava, which rotates the refresh token on
+// every use — usually omits refresh_token on a refresh response, meaning the
+// original one stays valid; overwriting it with undefined would silently
+// break every sync after the first refresh, hence the `|| tokens.refreshToken`
+// fallback below.
+// ---------------------------------------------------------------------------
+
+async function requestGoogleToken(params) {
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params),
+  })
+  if (!res.ok) throw new HttpsError('internal', `Google token request failed: ${await res.text()}`)
+  return res.json()
+}
+
+export const googleExchangeCode = onCall({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+  const uid = requireAuth(request)
+  const code = request.data?.code
+  const redirectUri = request.data?.redirectUri
+  if (!code || !redirectUri) throw new HttpsError('invalid-argument', 'Missing authorization code or redirect URI.')
+
+  const familyId = await resolveFamilyId(uid)
+
+  const tokens = await requestGoogleToken({
+    client_id: googleClientId.value(),
+    client_secret: googleClientSecret.value(),
+    code,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code',
+  })
+
+  await db.doc(`families/${familyId}/googleTokens/${uid}`).set({
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: Date.now() / 1000 + tokens.expires_in,
+    updatedAt: Date.now(),
+  })
+  await db.doc(`families/${familyId}/googleSync/${uid}`).set({ connected: true }, { merge: true })
+
+  return { connected: true }
+})
+
+async function getFreshGoogleAccessToken(familyId, uid) {
+  const ref = db.doc(`families/${familyId}/googleTokens/${uid}`)
+  const snap = await ref.get()
+  if (!snap.exists) throw new HttpsError('failed-precondition', 'Google is not connected.')
+  const tokens = snap.data()
+
+  const nowSeconds = Date.now() / 1000
+  if (tokens.expiresAt > nowSeconds + 60) return tokens.accessToken
+
+  const refreshed = await requestGoogleToken({
+    client_id: googleClientId.value(),
+    client_secret: googleClientSecret.value(),
+    refresh_token: tokens.refreshToken,
+    grant_type: 'refresh_token',
+  })
+
+  await ref.set({
+    accessToken: refreshed.access_token,
+    refreshToken: refreshed.refresh_token || tokens.refreshToken,
+    expiresAt: nowSeconds + refreshed.expires_in,
+    updatedAt: Date.now(),
+  }, { merge: true })
+
+  return refreshed.access_token
+}
+
+export const googleSync = onCall({ secrets: [googleClientId, googleClientSecret] }, async (request) => {
+  const uid = requireAuth(request)
+  const familyId = await resolveFamilyId(uid)
+
+  const accessToken = await getFreshGoogleAccessToken(familyId, uid)
+  const authHeader = { Authorization: `Bearer ${accessToken}` }
+
+  const { timeMin, timeMax } = calendarSyncWindow()
+  const eventsParams = new URLSearchParams({ timeMin, timeMax, singleEvents: 'true', maxResults: '250' })
+  const eventsRes = await fetch(`${GOOGLE_CALENDAR_EVENTS_URL}?${eventsParams}`, { headers: authHeader })
+  if (!eventsRes.ok) throw new HttpsError('internal', `Google Calendar fetch failed: ${await eventsRes.text()}`)
+  const { items: googleEvents = [] } = await eventsRes.json()
+
+  const tasksParams = new URLSearchParams({ showCompleted: 'false', maxResults: '100' })
+  const tasksRes = await fetch(`${GOOGLE_TASKS_URL}?${tasksParams}`, { headers: authHeader })
+  if (!tasksRes.ok) throw new HttpsError('internal', `Google Tasks fetch failed: ${await tasksRes.text()}`)
+  const { items: googleTasks = [] } = await tasksRes.json()
+
+  // Single-field-plus-equality queries again, same as stravaSync above —
+  // no composite index needed (see README/ARCHITECTURE.md).
+  const existingEventsSnap = await db
+    .collection(`families/${familyId}/events`)
+    .where('googleImported', '==', true)
+    .where('owner', '==', uid)
+    .get()
+  const existingEvents = existingEventsSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+
+  const existingTasksSnap = await db
+    .collection(`families/${familyId}/tasks`)
+    .where('googleImported', '==', true)
+    .where('owner', '==', uid)
+    .get()
+  const existingTasks = existingTasksSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+
+  const eventsPlan = planUpserts(existingEvents, googleEvents, { idField: 'googleEventId', mapFn: mapGoogleEventToFields })
+  const tasksPlan = planUpserts(existingTasks, googleTasks, { idField: 'googleTaskId', mapFn: mapGoogleTaskToFields })
+
+  const batch = db.batch()
+  eventsPlan.toCreate.forEach((fields) => {
+    batch.set(db.collection(`families/${familyId}/events`).doc(), { ...fields, owner: uid, createdAt: Date.now() })
+  })
+  eventsPlan.toUpdate.forEach(({ id, fields }) => {
+    batch.update(db.doc(`families/${familyId}/events/${id}`), fields)
+  })
+  tasksPlan.toCreate.forEach((fields) => {
+    batch.set(db.collection(`families/${familyId}/tasks`).doc(), { ...fields, owner: uid, createdAt: Date.now() })
+  })
+  tasksPlan.toUpdate.forEach(({ id, fields }) => {
+    batch.update(db.doc(`families/${familyId}/tasks/${id}`), fields)
+  })
+  await batch.commit()
+
+  await db.doc(`families/${familyId}/googleSync/${uid}`).set({ lastSyncedAt: Date.now() }, { merge: true })
+
+  return {
+    eventsImported: eventsPlan.toCreate.length + eventsPlan.toUpdate.length,
+    tasksImported: tasksPlan.toCreate.length + tasksPlan.toUpdate.length,
   }
 })

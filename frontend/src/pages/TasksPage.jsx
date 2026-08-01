@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLiveData } from '../hooks/useLiveData.js'
 import { usePeople } from '../hooks/usePeople.js'
+import { useAuth } from '../context/AuthContext.jsx'
 import { getTasks, addTask, updateTask, deleteTask, completeTask } from '../db.js'
 import { formatDisplayDate, isPastDue } from '../utils/dates.js'
 import { ALL } from '../consts.js'
@@ -37,6 +38,7 @@ function TaskRow({ task, ownerById, onToggle, onClick }) {
 export default function TasksPage() {
   const { data: tasks } = useLiveData(getTasks, [])
   const { people, ownerById } = usePeople()
+  const { user } = useAuth()
   const [tab, setTab] = useState('maintenance') // 'maintenance' | 'todo'
   const [viewAs, setViewAs] = useState('all')
   const [modalState, setModalState] = useState(null)
@@ -47,6 +49,11 @@ export default function TasksPage() {
       // Training prep to-dos are private to whoever's training plan they
       // belong to and live only on the Training page — see TrainingPage.jsx.
       .filter((t) => !t.trainingTask)
+      // Imported Google Tasks are visible on their owner's own Tasks page
+      // (that's the point of importing them) but hidden from everyone
+      // else's Combined view — see SettingsPage.jsx / CalendarPage.jsx for
+      // the same owner-conditional rule applied to Google Calendar events.
+      .filter((t) => !t.googleImported || t.owner === user?.uid)
       .filter((t) => t.type === tab)
       .filter((t) => showDone || !t.done)
       .filter((t) => viewAs === 'all' || t.owner === viewAs || t.owner === 'all')

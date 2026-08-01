@@ -1,18 +1,22 @@
-import { describe, test, expect, beforeEach } from 'vitest'
+import { describe, test, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TasksPage from '../../pages/TasksPage.jsx'
 import { addTask } from '../../db.js'
-import { seedTestFamily } from '../../test/helpers.js'
+import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
+
+// TasksPage reads useAuth() to scope imported Google Tasks to their owner —
+// see TasksPage.jsx — so it needs a signed-in, family-having context, same
+// as CalendarPage/TrainingPage/SettingsPage's tests.
+function renderTasks() {
+  return render(<TasksPage />, { wrapper: AllProviders })
+}
 
 describe('TasksPage', () => {
-  beforeEach(async () => {
-    await seedTestFamily()
-  })
-
   test('adding a to-do shows it under the To-dos tab', async () => {
+    await setupSignedInFamily()
     const user = userEvent.setup()
-    render(<TasksPage />)
+    renderTasks()
     await user.click(screen.getByRole('button', { name: 'To-dos' }))
 
     await user.click(screen.getByRole('button', { name: '+ Add' }))
@@ -23,8 +27,9 @@ describe('TasksPage', () => {
   })
 
   test('completing a task hides it unless "Show completed" is checked', async () => {
+    await setupSignedInFamily()
     const user = userEvent.setup()
-    render(<TasksPage />)
+    renderTasks()
     await user.click(screen.getByRole('button', { name: 'To-dos' }))
     await user.click(screen.getByRole('button', { name: '+ Add' }))
     await user.type(screen.getByPlaceholderText('Call the plumber'), 'Water the plants')
@@ -39,8 +44,9 @@ describe('TasksPage', () => {
   })
 
   test('completing a recurring maintenance task spawns the next occurrence', async () => {
+    await setupSignedInFamily()
     const user = userEvent.setup()
-    render(<TasksPage />) // defaults to the Maintenance tab
+    renderTasks() // defaults to the Maintenance tab
     await user.click(screen.getByRole('button', { name: '+ Add' }))
     await user.type(screen.getByPlaceholderText('Replace HVAC filter'), 'Change HVAC filter')
     await user.type(screen.getByLabelText(/Due date/), '2026-01-01')
@@ -59,8 +65,9 @@ describe('TasksPage', () => {
   })
 
   test('the Combined / individual filter chips scope which tasks are shown', async () => {
+    await setupSignedInFamily()
     const user = userEvent.setup()
-    render(<TasksPage />)
+    renderTasks()
     await user.click(screen.getByRole('button', { name: 'To-dos' }))
     await user.click(screen.getByRole('button', { name: '+ Add' }))
     await user.type(screen.getByPlaceholderText('Call the plumber'), 'Person 1 task')
@@ -77,9 +84,10 @@ describe('TasksPage', () => {
   })
 
   test('training prep to-dos stay off the household Tasks page, even with "Show completed" checked', async () => {
+    await setupSignedInFamily()
     await addTask({ title: 'Register for race', owner: 'person-1', trainingTask: true })
     const user = userEvent.setup()
-    render(<TasksPage />)
+    renderTasks()
     await user.click(screen.getByRole('button', { name: 'To-dos' }))
 
     await user.click(screen.getByRole('button', { name: '+ Add' }))
@@ -89,5 +97,17 @@ describe('TasksPage', () => {
 
     await user.click(screen.getByLabelText('Show completed'))
     expect(screen.queryByText('Register for race')).not.toBeInTheDocument()
+  })
+
+  test('an imported Google Task is visible in Combined view for its owner but hidden for everyone else', async () => {
+    const { user: authUser } = await setupSignedInFamily()
+    await addTask({ title: "Someone else's Google task", owner: 'person-1', type: 'todo', googleImported: true, googleTaskId: 'g1' })
+    await addTask({ title: 'My Google task', owner: authUser.uid, type: 'todo', googleImported: true, googleTaskId: 'g2' })
+    renderTasks()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'To-dos' }))
+
+    expect(await screen.findByText('My Google task')).toBeInTheDocument()
+    expect(screen.queryByText("Someone else's Google task")).not.toBeInTheDocument()
   })
 })
