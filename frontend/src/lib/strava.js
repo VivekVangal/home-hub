@@ -13,7 +13,15 @@ export function buildStravaAuthorizeUrl(redirectUri) {
     redirect_uri: redirectUri,
     response_type: 'code',
     approval_prompt: 'auto',
-    scope: 'activity:read_only',
+    // Strava's actual valid scopes are read/read_all/profile:read_all/
+    // profile:write/activity:read/activity:read_all/activity:write —
+    // "activity:read_only" (used here originally) isn't one of them and
+    // Strava rejects the authorize request outright with a 400 before
+    // ever showing a login page. activity:read (not _all) would only see
+    // activities the athlete has left public, missing anything logged as
+    // "Only You" — read_all is the one that actually covers a personal
+    // training log.
+    scope: 'activity:read_all',
   })
   return `https://www.strava.com/oauth/authorize?${params}`
 }
