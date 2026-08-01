@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from 'vitest'
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import WeekCalendar from '../../components/WeekCalendar.jsx'
@@ -89,5 +89,42 @@ describe('WeekCalendar', () => {
     )
     await user.click(screen.getAllByText(/^[A-Za-z]{3} \d{1,2}$/)[0])
     expect(onDayLabelClick).toHaveBeenCalledWith('2026-01-05')
+  })
+
+  describe('agendaMode', () => {
+    beforeEach(() => {
+      // Fixes "today" to a date outside weekDays (2026-01-05..11), so these
+      // tests aren't accidentally affected by the "today always shows" rule
+      // unless a test deliberately mocks today to fall inside that range.
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    test('skips days with no events', () => {
+      const events = [
+        { id: 'e1', title: 'Dentist', date: '2026-01-07', owner: 'person-1' },
+        { id: 'e2', title: 'Haircut', date: '2026-01-09', owner: 'person-1' },
+      ]
+      render(<WeekCalendar days={weekDays} events={events} ownerById={ownerById} onDayAdd={vi.fn()} onEventClick={vi.fn()} agendaMode />)
+      expect(screen.getByText('Dentist')).toBeInTheDocument()
+      expect(screen.getByText('Haircut')).toBeInTheDocument()
+      expect(screen.queryAllByText(/^[A-Za-z]{3} \d{1,2}$/)).toHaveLength(2)
+    })
+
+    test('still shows today even with no events, as an anchor', () => {
+      vi.setSystemTime(new Date('2026-01-07T12:00:00Z')) // falls inside weekDays
+      render(<WeekCalendar days={weekDays} events={[]} ownerById={ownerById} onDayAdd={vi.fn()} onEventClick={vi.fn()} agendaMode />)
+      expect(screen.getAllByText(/^[A-Za-z]{3} \d{1,2}$/)).toHaveLength(1)
+      expect(screen.getByText('—')).toBeInTheDocument()
+    })
+
+    test('shows every day when every day has events (nothing to skip)', () => {
+      const events = weekDays.map((day, i) => ({ id: `e${i}`, title: `Event ${i}`, date: day, owner: 'person-1' }))
+      render(<WeekCalendar days={weekDays} events={events} ownerById={ownerById} onDayAdd={vi.fn()} onEventClick={vi.fn()} agendaMode />)
+      expect(screen.getAllByText(/^[A-Za-z]{3} \d{1,2}$/)).toHaveLength(7)
+    })
   })
 })

@@ -11,7 +11,13 @@ import { formatStravaSummary } from '../lib/strava.js'
 // mini-calendar) suppresses the "+" add-event button per day — that widget
 // is a read-mostly at-a-glance view of someone's own training sessions, not
 // a place to create arbitrary new calendar events.
-export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEventClick, onDayLabelClick, hideAddButton = false }) {
+//
+// `agendaMode` (default false, used by CalendarPage.jsx on phone-width
+// screens) skips rendering a day-card at all for empty days — mirrors
+// Google Calendar's mobile agenda view, where a sparse week doesn't force
+// scrolling past a run of bare "—" placeholders. Today always renders even
+// when empty, so there's still a fixed anchor point in the list.
+export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEventClick, onDayLabelClick, hideAddButton = false, agendaMode = false }) {
   const today = todayISO()
 
   const eventsByDay = days.reduce((acc, d) => {
@@ -19,9 +25,11 @@ export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEven
     return acc
   }, {})
 
+  const visibleDays = agendaMode ? days.filter((day) => day === today || eventsByDay[day].length > 0) : days
+
   return (
     <div className="week-grid">
-      {days.map((day) => (
+      {visibleDays.map((day) => (
         <div key={day} className={'week-day' + (day === today ? ' is-today' : '')}>
           <div className="week-day-header">
             <div

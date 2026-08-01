@@ -2,11 +2,14 @@ import { useMemo, useState } from 'react'
 import { useLiveData } from '../hooks/useLiveData.js'
 import { usePeople } from '../hooks/usePeople.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 import { getEvents, addEvent, updateEvent, deleteEvent } from '../db.js'
 import { getWeekStart, getWeekDays, addDaysISO, formatShortDate, formatDisplayDate, todayISO } from '../utils/dates.js'
 import { ALL } from '../consts.js'
 import WeekCalendar from '../components/WeekCalendar.jsx'
 import EventModal from '../components/EventModal.jsx'
+
+const AGENDA_DAYS = 14
 
 export default function CalendarPage() {
   const [viewMode, setViewMode] = useState('week') // 'week' | 'day'
@@ -17,8 +20,17 @@ export default function CalendarPage() {
   const { user } = useAuth()
   const [viewAs, setViewAs] = useState('all') // 'all' (combined) or a person id (individual)
   const [modalState, setModalState] = useState(null) // { mode: 'add'|'edit', event? }
+  const isMobile = useIsMobile()
 
-  const days = viewMode === 'week' ? getWeekDays(weekStart) : [selectedDay]
+  // On phones, the Week/Day toggle gives way to a Google-Calendar-style
+  // agenda: a rolling window starting today, sparse days skipped entirely
+  // (see WeekCalendar.jsx's agendaMode) rather than a hard 7-day boundary.
+  const today = todayISO()
+  const agendaDays = useMemo(
+    () => Array.from({ length: AGENDA_DAYS }, (_, i) => addDaysISO(today, i)),
+    [today]
+  )
+  const days = isMobile ? agendaDays : viewMode === 'week' ? getWeekDays(weekStart) : [selectedDay]
   const rangeEvents = useMemo(
     () => (events || [])
       // Training-plan sessions and imported Google Calendar events are both
@@ -38,9 +50,11 @@ export default function CalendarPage() {
     [rangeEvents, viewAs]
   )
 
-  const label = viewMode === 'week'
-    ? `${formatShortDate(days[0])} – ${formatShortDate(days[6])}`
-    : formatDisplayDate(selectedDay)
+  const label = isMobile
+    ? 'Agenda'
+    : viewMode === 'week'
+      ? `${formatShortDate(days[0])} – ${formatShortDate(days[6])}`
+      : formatDisplayDate(selectedDay)
 
   const handleSave = async (data) => {
     if (modalState.event) {
@@ -104,22 +118,24 @@ export default function CalendarPage() {
 
       <div className="week-nav">
         <div className="week-nav-controls">
-          <button className="btn" onClick={goPrev}>← Prev</button>
+          {!isMobile && <button className="btn" onClick={goPrev}>← Prev</button>}
           <div className="week-nav-label">{label}</div>
-          <button className="btn" onClick={goNext}>Next →</button>
+          {!isMobile && <button className="btn" onClick={goNext}>Next →</button>}
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className={'btn' + (viewMode === 'week' ? ' btn-primary' : '')} onClick={() => setViewMode('week')}>
-            Week
-          </button>
-          <button className={'btn' + (viewMode === 'day' ? ' btn-primary' : '')} onClick={() => setViewMode('day')}>
-            Day
-          </button>
-          <button className="btn" onClick={goToToday}>{viewMode === 'week' ? 'This week' : 'Today'}</button>
-          <button className="btn btn-primary" onClick={() => setModalState({ event: null, defaultDate: days[0] })}>
-            + Add event
-          </button>
-        </div>
+        {!isMobile && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className={'btn' + (viewMode === 'week' ? ' btn-primary' : '')} onClick={() => setViewMode('week')}>
+              Week
+            </button>
+            <button className={'btn' + (viewMode === 'day' ? ' btn-primary' : '')} onClick={() => setViewMode('day')}>
+              Day
+            </button>
+            <button className="btn" onClick={goToToday}>{viewMode === 'week' ? 'This week' : 'Today'}</button>
+            <button className="btn btn-primary" onClick={() => setModalState({ event: null, defaultDate: days[0] })}>
+              + Add event
+            </button>
+          </div>
+        )}
       </div>
 
       {!events ? (
@@ -131,8 +147,19 @@ export default function CalendarPage() {
           ownerById={ownerById}
           onDayAdd={(day) => setModalState({ event: null, defaultDate: day })}
           onEventClick={(ev) => setModalState({ event: ev })}
-          onDayLabelClick={viewMode === 'week' ? jumpToDay : undefined}
+          onDayLabelClick={!isMobile && viewMode === 'week' ? jumpToDay : undefined}
+          agendaMode={isMobile}
         />
+      )}
+
+      {isMobile && (
+        <button
+          className="btn btn-primary calendar-fab"
+          onClick={() => setModalState({ event: null, defaultDate: today })}
+          aria-label="New event"
+        >
+          +
+        </button>
       )}
 
       {modalState && (

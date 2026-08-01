@@ -17,6 +17,20 @@ vi.mock('firebase/firestore', () => firestoreMock)
 vi.mock('firebase/auth', () => authMock)
 vi.mock('firebase/functions', () => functionsMock)
 
+// jsdom doesn't implement matchMedia at all. Defaults to "doesn't match"
+// (desktop width) — tests that need to simulate a mobile viewport
+// (useIsMobile, see hooks/useIsMobile.js) override window.matchMedia
+// themselves for that one test, same pattern already used for
+// window.location in SettingsPage.test.jsx.
+window.matchMedia = window.matchMedia || function matchMedia(query) {
+  return {
+    matches: false,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }
+}
+
 // Every test starts from a clean slate: no leftover DOM, no leftover
 // localStorage, and fresh (empty) fake Firestore/Auth state.
 afterEach(() => {

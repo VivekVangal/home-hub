@@ -1,14 +1,21 @@
 :root {
   color-scheme: light;
-  --bg: #f7f7f5;
+  /* Palette nudged toward Acorns/Grow-style fintech green — deeper and a
+     touch more saturated than the original muted sage, still light enough
+     on --bg/--surface to keep body text contrast comfortable. --radius
+     bumped from a fairly boxy 10px toward the generously-rounded card look
+     those apps use; individual controls (buttons) get their own smaller
+     bump below rather than inheriting this directly, so text-heavy buttons
+     don't turn into full pills. */
+  --bg: #f6f6f2;
   --surface: #ffffff;
   --border: #e5e5e0;
   --text: #24231f;
   --text-muted: #6b6a63;
-  --accent: #3b6e5e;
-  --accent-soft: #e7efec;
+  --accent: #1f6b4f;
+  --accent-soft: #e3f0ea;
   --danger: #d9534f;
-  --radius: 10px;
+  --radius: 16px;
   --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -195,7 +202,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -624,6 +631,26 @@ body {
   gap: 8px;
 }
 
+/* Mobile agenda view's floating add button (CalendarPage.jsx) — fixed
+   bottom-right, same spot the pattern lives in Google Calendar/most
+   agenda-style mobile apps, so it's reachable one-handed regardless of
+   scroll position. */
+.calendar-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  font-size: 1.6rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  z-index: 40;
+}
+
 .week-nav-label {
   font-weight: 600;
   font-size: 0.9rem;
@@ -649,4 +676,36 @@ body {
 @media (max-width: 560px) {
   .grocery-add-form { flex-direction: column; }
   .grocery-add-form input, .grocery-add-form select { width: 100%; }
+}
+
+/* --- Tablet (10" fridge-mounted, either orientation) ---
+   Not a new layout — the existing page structure (Home's grid-3, the
+   calendar grid, cards everywhere) already reflows fine at this width.
+   The gap at this size is touch-target comfort (tapped at arm's length,
+   not with a precise mouse cursor) and readability from a few feet away,
+   not architecture — so this stays CSS-only: bigger padding, bigger tap
+   targets, bigger type. */
+@media (min-width: 768px) and (max-width: 1280px) {
+  body { font-size: 1.05rem; }
+
+  .card { padding: 26px; }
+
+  .page-title { font-size: 1.9rem; }
+  .section-title { font-size: 1.3rem; }
+
+  .btn {
+    padding: 11px 20px;
+    font-size: 0.95rem;
+  }
+
+  .btn-icon { padding: 9px 12px; }
+
+  .checkbox {
+    width: 24px;
+    height: 24px;
+  }
+
+  .list-item { padding: 14px 0; }
+  .list-item-title { font-size: 1rem; }
+  .list-item-sub { font-size: 0.85rem; }
 }

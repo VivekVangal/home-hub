@@ -1,10 +1,19 @@
-import { describe, test, expect, beforeEach } from 'vitest'
+import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CalendarPage from '../../pages/CalendarPage.jsx'
 import { addEvent } from '../../db.js'
-import { todayISO } from '../../utils/dates.js'
+import { todayISO, addDaysISO } from '../../utils/dates.js'
 import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
+
+// Simulates a phone-width viewport for useIsMobile() (see hooks/useIsMobile.js)
+// — jsdom's window.matchMedia is itself only a stub (see test/setup.js), so
+// this overrides it to report "matches" for any max-width query.
+function mockMobileViewport() {
+  const original = window.matchMedia
+  window.matchMedia = (query) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })
+  return () => { window.matchMedia = original }
+}
 
 // These exercise the "combined vs. individual" calendar requirement end to
 // end: an event owned by one person should be hidden from the other
@@ -123,5 +132,52 @@ describe('CalendarPage — Google Calendar import privacy', () => {
 
     expect(await screen.findByText('My Google event')).toBeInTheDocument()
     expect(screen.queryByText("Someone else's Google event")).not.toBeInTheDocument()
+  })
+})
+
+describe('CalendarPage — mobile agenda view', () => {
+  let restoreViewport
+
+  beforeEach(async () => {
+    restoreViewport = mockMobileViewport()
+    await setupSignedInFamily()
+  })
+
+  afterEach(() => {
+    restoreViewport()
+  })
+
+  test('hides the Week/Day toggle and Prev/Next controls, shown otherwise', async () => {
+    renderCalendar()
+    await screen.findByText('Agenda')
+    expect(screen.queryByRole('button', { name: 'Week' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Day' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '← Prev' })).not.toBeInTheDocument()
+  })
+
+  test('an event today shows up in the agenda, and the floating "+" button opens the modal on today\'s date', async () => {
+    const user = userEvent.setup()
+    await addEvent({ title: 'Vet appointment', date: todayISO(), owner: 'all' })
+    renderCalendar()
+
+    expect(await screen.findByText('Vet appointment')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'New event' }))
+    await user.type(screen.getByPlaceholderText('Dentist appointment'), 'New agenda item')
+    expect(screen.getByLabelText(/Date/)).toHaveValue(todayISO())
+    await user.click(screen.getByRole('button', { name: 'Add event' }))
+
+    expect(await screen.findByText('New agenda item')).toBeInTheDocument()
+  })
+
+  test('skips empty days beyond today, showing only days with something scheduled', async () => {
+    await addEvent({ title: 'Far-out plan', date: addDaysISO(todayISO(), 5), owner: 'all' })
+    renderCalendar()
+    await screen.findByText('Agenda')
+
+    // Today always renders as an anchor even though it's empty (exactly one
+    // "—" placeholder, for today); every other visible day has an event.
+    expect(await screen.findByText('Far-out plan')).toBeInTheDocument()
+    expect(screen.getAllByText('—')).toHaveLength(1)
   })
 })
