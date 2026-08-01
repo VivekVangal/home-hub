@@ -8,6 +8,7 @@
 
 import { addDaysISO, toISODate } from '../utils/dates.js'
 import { parseISO, startOfWeek, addWeeks, differenceInCalendarWeeks } from 'date-fns'
+import { pickWeeklyExercises } from './exercises.js'
 
 // Common race distances, in miles, for the form's dropdown.
 export const DISTANCES = {
@@ -343,11 +344,22 @@ function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, 
   switch (kind) {
     case 'rest':
       return { title: 'Rest / mobility', notes: '20 min easy walk or mobility work. Full rest is fine too.' }
-    case 'strength':
+    case 'strength': {
+      // Rotates through lib/exercises.js by weekIndex so the plan names
+      // specific moves instead of a generic "lower body + core" blob, and
+      // varies week to week rather than prescribing the exact same four
+      // moves for the whole training block. Deterministic (same weekIndex
+      // always picks the same exercises), so this stays a pure function.
+      const { strength, stretch } = pickWeeklyExercises(weekIndex)
+      const strengthNames = strength.map((e) => e.name).join(', ')
+      const stretchNames = stretch.map((e) => e.name).join(', ')
       return {
         title: 'Strength + stretch',
-        notes: `Lower body + core, 30-40 min (${equipment || 'bodyweight'}), plus 10 min stretch.`,
+        notes: `${strengthNames} (${equipment || 'bodyweight'}), ~30-40 min total. Stretch: ${stretchNames}, ~10 min.`,
+        strengthExerciseIds: strength.map((e) => e.id),
+        stretchExerciseIds: stretch.map((e) => e.id),
       }
+    }
     case 'quality': {
       const miles = easyMilesForWeek(weekIndex, phases, mileageMultiplier)
       if (phase === 'base') {
@@ -395,7 +407,7 @@ function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, t
       })
       continue
     }
-    const { title, notes } = sessionForKind(kind, {
+    const { title, notes, strengthExerciseIds, stretchExerciseIds } = sessionForKind(kind, {
       weekIndex,
       phases,
       goal,
@@ -410,6 +422,8 @@ function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, t
       title,
       notes: `[Week ${weekIndex + 1}/${phases.totalWeeks}, ${phase}] ${notes}`,
       phase,
+      ...(strengthExerciseIds ? { strengthExerciseIds } : {}),
+      ...(stretchExerciseIds ? { stretchExerciseIds } : {}),
     })
   }
   return sessions
@@ -503,6 +517,8 @@ export function trainingPlanToEvents(plan, owner) {
       owner,
       notes: s.notes,
       trainingPlan: true,
+      ...(s.strengthExerciseIds ? { strengthExerciseIds: s.strengthExerciseIds } : {}),
+      ...(s.stretchExerciseIds ? { stretchExerciseIds: s.stretchExerciseIds } : {}),
     }))
   )
 }

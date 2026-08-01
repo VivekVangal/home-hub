@@ -240,6 +240,21 @@ describe('buildTrainingPlan', () => {
     expect(plan.weeks[0].sessions[2].title).toBe('Strength + stretch') // Wednesday, per DAYS
   })
 
+  test('strength sessions name specific exercises and carry their ids for the UI to link out to', () => {
+    const strengthSession = plan.weeks[0].sessions[2] // Wednesday, per DAYS
+    expect(strengthSession.strengthExerciseIds).toHaveLength(4)
+    expect(strengthSession.stretchExerciseIds).toHaveLength(2)
+    // The notes should actually name the exercises, not a generic blob.
+    expect(strengthSession.notes).not.toContain('Lower body + core')
+    expect(strengthSession.notes).toContain('Stretch:')
+  })
+
+  test('strength exercises vary week to week rather than repeating the same four moves all block', () => {
+    const week0Strength = plan.weeks[0].sessions[2].strengthExerciseIds
+    const week1Strength = plan.weeks[1].sessions[2].strengthExerciseIds
+    expect(week0Strength).not.toEqual(week1Strength)
+  })
+
   test('exposes the VDOT-derived paces at the plan level when a recent race is given', () => {
     expect(plan.vdot).not.toBeNull()
     expect(plan.vdot.paces.threshold.pace).toMatch(/^\d+:\d{2}\/mi$/)
@@ -380,5 +395,21 @@ describe('trainingPlanToEvents', () => {
       expect(e.date).toBeTruthy()
       expect(e.title).toBeTruthy()
     })
+  })
+
+  test('carries strengthExerciseIds/stretchExerciseIds onto the strength-session event', () => {
+    const plan = buildTrainingPlan(baseProfile())
+    const events = trainingPlanToEvents(plan, 'user-123')
+    const strengthEvent = events.find((e) => e.title === 'Strength + stretch')
+    expect(strengthEvent.strengthExerciseIds).toHaveLength(4)
+    expect(strengthEvent.stretchExerciseIds).toHaveLength(2)
+  })
+
+  test('other event types do not carry exercise id fields at all', () => {
+    const plan = buildTrainingPlan(baseProfile())
+    const events = trainingPlanToEvents(plan, 'user-123')
+    const restEvent = events.find((e) => e.title === 'Rest / mobility')
+    expect(restEvent.strengthExerciseIds).toBeUndefined()
+    expect(restEvent.stretchExerciseIds).toBeUndefined()
   })
 })

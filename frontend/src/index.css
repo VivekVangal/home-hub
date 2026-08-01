@@ -140,6 +140,21 @@ body {
   color: #fff;
 }
 
+.exercise-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+
+.exercise-chip:hover {
+  text-decoration: underline;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

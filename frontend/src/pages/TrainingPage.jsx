@@ -15,6 +15,7 @@ import { buildStravaAuthorizeUrl, formatStravaSummary } from '../lib/strava.js'
 import { formatAppleHealthSummary } from '../lib/appleHealth.js'
 import { formatGarminSummary } from '../lib/garmin.js'
 import { parseGarminActivitiesCsv, matchGarminActivitiesToSessions, garminActivityToSessionFields } from '../lib/garminImport.js'
+import { exerciseById } from '../lib/exercises.js'
 import TrainingPlanForm from '../components/TrainingPlanForm.jsx'
 
 const PHASE_LABEL = { base: 'Base building', build: 'Build', taper: 'Taper' }
@@ -36,6 +37,35 @@ export function describeAdjustment({ mileageMultiplier, paceAdjustmentPct, sessi
     parts.push('nudged your stretch goal a little slower — recent runs were well off it')
   }
   return `Adjusted based on your last 3 weeks: ${parts.join('; ')}.`
+}
+
+// Clickable chips for a session's specific strength/stretch exercises (see
+// lib/exercises.js) — each links out to a real demonstration (a YouTube
+// search, not an embedded/hotlinked gif — see that file's header comment
+// for why) rather than just leaving the exercise name as plain text in the
+// notes with nothing to click through to.
+function ExerciseChips({ ids }) {
+  if (!ids || ids.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+      {ids.map((id) => {
+        const ex = exerciseById(id)
+        if (!ex) return null
+        return (
+          <a
+            key={id}
+            href={ex.referenceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="exercise-chip"
+            title={`${ex.instructions} — ${ex.reps}`}
+          >
+            {ex.name} ↗
+          </a>
+        )
+      })}
+    </div>
+  )
 }
 
 function SessionRow({ session, onSetStatus }) {
@@ -60,6 +90,9 @@ function SessionRow({ session, onSetStatus }) {
         )}
         {garminSummary && (
           <div className="list-item-sub" style={{ color: 'var(--accent)' }}>Imported from Garmin: {garminSummary}</div>
+        )}
+        {(session.strengthExerciseIds || session.stretchExerciseIds) && (
+          <ExerciseChips ids={[...(session.strengthExerciseIds || []), ...(session.stretchExerciseIds || [])]} />
         )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
