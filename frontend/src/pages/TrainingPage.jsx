@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { httpsCallable } from 'firebase/functions'
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useLiveData } from '../hooks/useLiveData.js'
+import { usePeople } from '../hooks/usePeople.js'
 import {
   getEvents, getTrainingProfile, saveTrainingProfile, addTrainingPlan, deleteUpcomingTrainingPlan, updateEvent,
   getTasks, addTask, updateTask, deleteTask, completeTask, applyImportedSessions,
 } from '../db.js'
 import { functions } from '../firebase.js'
-import { todayISO, addDaysISO, formatDisplayDate } from '../utils/dates.js'
+import { todayISO, addDaysISO, formatDisplayDate, formatShortDate, getWeekStart, getWeekDays } from '../utils/dates.js'
 import { buildTrainingPlan, trainingPlanToEvents, nextMondayISO } from '../lib/trainingPlan.js'
 import { buildStravaAuthorizeUrl, formatStravaSummary } from '../lib/strava.js'
 import { formatAppleHealthSummary } from '../lib/appleHealth.js'
@@ -17,6 +18,7 @@ import { formatGarminSummary } from '../lib/garmin.js'
 import { parseGarminActivitiesCsv, matchGarminActivitiesToSessions, garminActivityToSessionFields } from '../lib/garminImport.js'
 import { exerciseById } from '../lib/exercises.js'
 import TrainingPlanForm from '../components/TrainingPlanForm.jsx'
+import WeekCalendar from '../components/WeekCalendar.jsx'
 
 const PHASE_LABEL = { base: 'Base building', build: 'Build', taper: 'Taper' }
 
@@ -172,10 +174,12 @@ export default function TrainingPage() {
   const { data: events, loading: eventsLoading } = useLiveData(getEvents, [])
   const { data: profile, loading: profileLoading } = useLiveData(() => getTrainingProfile(user?.uid), [user?.uid])
   const { data: allTasks, loading: tasksLoading } = useLiveData(getTasks, [])
+  const { ownerById } = usePeople()
   const [editing, setEditing] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [adjustmentNote, setAdjustmentNote] = useState(null)
   const [showDoneTasks, setShowDoneTasks] = useState(false)
+  const [calendarWeekStart, setCalendarWeekStart] = useState(getWeekStart())
   const [connectingStrava, setConnectingStrava] = useState(false)
   const [syncingStrava, setSyncingStrava] = useState(false)
   const [stravaStatus, setStravaStatus] = useState(null)
@@ -229,6 +233,13 @@ export default function TrainingPage() {
   // logged as done/skipped, not just future ones.
   const sessionWindowStart = addDaysISO(today, -6)
   const sessions = trainingEvents.filter((e) => e.date >= sessionWindowStart).slice(0, 12)
+
+  // A compact week-at-a-glance calendar, right on this page, so training
+  // sessions don't feel like a separate thing you have to go find on
+  // /calendar — they're the exact same events (see db.js/trainingEvents
+  // above), just filtered down to this person's own week here.
+  const calendarDays = getWeekDays(calendarWeekStart)
+  const calendarWeekEvents = trainingEvents.filter((e) => calendarDays.includes(e.date))
 
   // Last 3 weeks of already-logged sessions, fed into buildTrainingPlan so
   // regenerating reacts to how training actually went (skipped sessions
@@ -455,6 +466,47 @@ export default function TrainingPage() {
             </div>
           </div>
         )
+      )}
+
+      {!loading && hasPlan && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+            <div className="section-title" style={{ marginBottom: 0 }}>Calendar</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-icon"
+                onClick={() => setCalendarWeekStart(addDaysISO(calendarWeekStart, -7))}
+                aria-label="Previous week"
+              >
+                ‹
+              </button>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                {formatShortDate(calendarDays[0])} – {formatShortDate(calendarDays[6])}
+              </span>
+              <button
+                type="button"
+                className="btn btn-icon"
+                onClick={() => setCalendarWeekStart(addDaysISO(calendarWeekStart, 7))}
+                aria-label="Next week"
+              >
+                ›
+              </button>
+              <button type="button" className="btn" onClick={() => setCalendarWeekStart(getWeekStart())}>Today</button>
+            </div>
+          </div>
+          <WeekCalendar
+            days={calendarDays}
+            events={calendarWeekEvents}
+            ownerById={ownerById}
+            onEventClick={(ev) => handleSetStatus(ev, 'done')}
+            hideAddButton
+          />
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 10, marginBottom: 0 }}>
+            Just your own training sessions — the same events also show up on the full <Link to="/calendar">/calendar</Link> page,
+            visible only to you there too. Click a session to mark it done.
+          </p>
+        </div>
       )}
 
       <div className="card" style={{ marginBottom: 16 }}>

@@ -69,6 +69,11 @@ describe('WeekCalendar', () => {
     expect(onEventClick).toHaveBeenCalledWith(event)
   })
 
+  test('hideAddButton suppresses the per-day "+" button (used by TrainingPage\'s mini calendar)', () => {
+    render(<WeekCalendar days={weekDays} events={[]} ownerById={ownerById} onDayAdd={vi.fn()} onEventClick={vi.fn()} hideAddButton />)
+    expect(screen.queryAllByRole('button', { name: '+' })).toHaveLength(0)
+  })
+
   test('clicking a day header calls onDayLabelClick with that day, when provided', async () => {
     const user = userEvent.setup()
     const onDayLabelClick = vi.fn()

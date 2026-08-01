@@ -6,7 +6,12 @@ import { formatStravaSummary } from '../lib/strava.js'
 // view, or a single-element array for the day view (CalendarPage.jsx picks
 // which). Same day-cell markup either way; the CSS grid just ends up with
 // fewer columns.
-export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEventClick, onDayLabelClick }) {
+//
+// `hideAddButton` (default false, only used by TrainingPage.jsx's compact
+// mini-calendar) suppresses the "+" add-event button per day — that widget
+// is a read-mostly at-a-glance view of someone's own training sessions, not
+// a place to create arbitrary new calendar events.
+export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEventClick, onDayLabelClick, hideAddButton = false }) {
   const today = todayISO()
 
   const eventsByDay = days.reduce((acc, d) => {
@@ -26,7 +31,7 @@ export default function WeekCalendar({ days, events, ownerById, onDayAdd, onEven
               <div className="week-day-name">{formatDayLabel(day)}</div>
               <div className="week-day-date">{formatShortDate(day)}</div>
             </div>
-            <button className="btn btn-icon" onClick={() => onDayAdd(day)}>+</button>
+            {!hideAddButton && <button className="btn btn-icon" onClick={() => onDayAdd(day)}>+</button>}
           </div>
           <div className="week-day-events">
             {eventsByDay[day].length === 0 && <div className="week-day-empty">—</div>}

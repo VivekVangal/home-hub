@@ -70,6 +70,27 @@ describe('TrainingPage', () => {
     expect(screen.queryByText(/No training sessions scheduled yet/)).not.toBeInTheDocument()
   })
 
+  test('shows a "Calendar" mini-calendar once a plan exists, with working week navigation', async () => {
+    await setupSignedInFamily()
+    renderTraining()
+    await screen.findByText('Build your training plan')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Generate my training plan' }))
+    await screen.findByRole('button', { name: 'Regenerate remaining plan' })
+
+    expect(await screen.findByText('Calendar')).toBeInTheDocument()
+    // 7 day-date labels (e.g. "Aug 3") for the displayed week.
+    expect(screen.getAllByText(/^[A-Za-z]{3} \d{1,2}$/)).toHaveLength(7)
+
+    const rangeBefore = screen.getByText(/–/).textContent
+    await user.click(screen.getByRole('button', { name: 'Next week' }))
+    expect(screen.getByText(/–/).textContent).not.toBe(rangeBefore)
+
+    await user.click(screen.getByRole('button', { name: 'Today' }))
+    expect(screen.getByText(/–/).textContent).toBe(rangeBefore)
+  })
+
   test('"Edit plan" brings the form back, prefilled from the saved profile', async () => {
     await setupSignedInFamily()
     renderTraining()
