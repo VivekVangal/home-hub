@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
-import TrainingPage from '../../pages/TrainingPage.jsx'
+import TrainingPage, { describeAdjustment } from '../../pages/TrainingPage.jsx'
 import { saveTrainingProfile } from '../../db.js'
 import { nextMondayISO } from '../../lib/trainingPlan.js'
 import { todayISO } from '../../utils/dates.js'
@@ -14,6 +14,37 @@ import { AllProviders, setupSignedInFamily } from '../../test/helpers.js'
 function renderTraining() {
   return render(<MemoryRouter><TrainingPage /></MemoryRouter>, { wrapper: AllProviders })
 }
+
+describe('describeAdjustment', () => {
+  test('returns null when nothing has been logged yet', () => {
+    expect(describeAdjustment({ mileageMultiplier: 1, paceAdjustmentPct: 0, sessionsConsidered: 0 })).toBeNull()
+  })
+
+  test('returns null when sessions were logged but neither adjustment triggered', () => {
+    expect(describeAdjustment({ mileageMultiplier: 1, paceAdjustmentPct: 0, sessionsConsidered: 3 })).toBeNull()
+  })
+
+  test('mentions a slowed ramp when the mileage multiplier is below 1', () => {
+    const note = describeAdjustment({ mileageMultiplier: 0.75, paceAdjustmentPct: 0, sessionsConsidered: 4 })
+    expect(note).toMatch(/slowed the mileage ramp 25%/)
+  })
+
+  test('mentions a faster stretch goal when the pace adjustment is negative', () => {
+    const note = describeAdjustment({ mileageMultiplier: 1, paceAdjustmentPct: -0.03, sessionsConsidered: 4 })
+    expect(note).toMatch(/nudged your stretch goal a little faster/)
+  })
+
+  test('mentions a slower stretch goal when the pace adjustment is positive', () => {
+    const note = describeAdjustment({ mileageMultiplier: 1, paceAdjustmentPct: 0.03, sessionsConsidered: 4 })
+    expect(note).toMatch(/nudged your stretch goal a little slower/)
+  })
+
+  test('mentions both when the ramp slowed and the pace adjusted in the same regeneration', () => {
+    const note = describeAdjustment({ mileageMultiplier: 0.9, paceAdjustmentPct: 0.03, sessionsConsidered: 6 })
+    expect(note).toMatch(/slowed the mileage ramp/)
+    expect(note).toMatch(/nudged your stretch goal a little slower/)
+  })
+})
 
 describe('TrainingPage', () => {
   test('shows the training-plan form, prefilled with sensible defaults, before any plan exists', async () => {

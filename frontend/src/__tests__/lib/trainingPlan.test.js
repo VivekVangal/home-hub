@@ -8,6 +8,7 @@ import {
   predictTime,
   longRunTarget,
   buildDaysMapping,
+  computeTrainingAdjustment,
 } from '../../lib/trainingPlan.js'
 
 // Fixed dates so these tests don't depend on "today": 2026-08-03 is a
@@ -185,6 +186,104 @@ describe('buildTrainingPlan', () => {
 
   test('respects a custom day assignment (strength on the configured day)', () => {
     expect(plan.weeks[0].sessions[2].title).toBe('Strength + stretch') // Wednesday, per DAYS
+  })
+})
+
+describe('computeTrainingAdjustment', () => {
+  const GOAL_PACE = 10 // min/mi, for readability in these fixtures
+
+  test('returns a neutral adjustment when nothing has been logged yet', () => {
+    const adjustment = computeTrainingAdjustment([], GOAL_PACE)
+    expect(adjustment).toEqual({ mileageMultiplier: 1, paceAdjustmentPct: 0, skipRate: 0, sessionsConsidered: 0 })
+  })
+
+  test('ignores sessions with no sessionStatus (future/unscheduled)', () => {
+    const sessions = [{ date: '2026-08-01' }, { date: '2026-08-02' }]
+    expect(computeTrainingAdjustment(sessions, GOAL_PACE).sessionsConsidered).toBe(0)
+  })
+
+  test('slows the mileage ramp when more than half of logged sessions were skipped', () => {
+    const sessions = [
+      { sessionStatus: 'skipped' }, { sessionStatus: 'skipped' }, { sessionStatus: 'skipped' }, { sessionStatus: 'done' },
+    ]
+    const adjustment = computeTrainingAdjustment(sessions, GOAL_PACE)
+    expect(adjustment.skipRate).toBe(0.75)
+    expect(adjustment.mileageMultiplier).toBe(0.75)
+  })
+
+  test('slows the ramp less aggressively between a third and a half skipped', () => {
+    const sessions = [{ sessionStatus: 'skipped' }, { sessionStatus: 'done' }, { sessionStatus: 'done' }]
+    const adjustment = computeTrainingAdjustment(sessions, GOAL_PACE)
+    expect(adjustment.skipRate).toBeCloseTo(1 / 3, 5)
+    expect(adjustment.mileageMultiplier).toBe(1) // exactly 1/3 doesn't cross the "> 1/3" threshold
+  })
+
+  test('leaves the ramp untouched when compliance is good', () => {
+    const sessions = [{ sessionStatus: 'done' }, { sessionStatus: 'done' }, { sessionStatus: 'skipped' }]
+    expect(computeTrainingAdjustment(sessions, GOAL_PACE).mileageMultiplier).toBe(1)
+  })
+
+  test('nudges the goal faster when logged runs consistently beat goal pace', () => {
+    const sessions = [
+      { sessionStatus: 'done', actualPaceMinPerMile: 9.0 },
+      { sessionStatus: 'done', actualPaceMinPerMile: 9.2 },
+    ]
+    const adjustment = computeTrainingAdjustment(sessions, GOAL_PACE)
+    expect(adjustment.paceAdjustmentPct).toBeLessThan(0)
+  })
+
+  test('nudges the goal slower when logged runs are consistently much slower than goal pace', () => {
+    const sessions = [
+      { sessionStatus: 'done', actualPaceMinPerMile: 13.5 },
+      { sessionStatus: 'done', actualPaceMinPerMile: 14.0 },
+    ]
+    const adjustment = computeTrainingAdjustment(sessions, GOAL_PACE)
+    expect(adjustment.paceAdjustmentPct).toBeGreaterThan(0)
+  })
+
+  test('leaves pace untouched with only one logged pace data point (not enough signal)', () => {
+    const sessions = [{ sessionStatus: 'done', actualPaceMinPerMile: 9.0 }]
+    expect(computeTrainingAdjustment(sessions, GOAL_PACE).paceAdjustmentPct).toBe(0)
+  })
+
+  test('leaves pace untouched when actual pace is close to goal pace (neither clearly faster nor slower)', () => {
+    const sessions = [
+      { sessionStatus: 'done', actualPaceMinPerMile: 10.1 },
+      { sessionStatus: 'done', actualPaceMinPerMile: 10.2 },
+    ]
+    expect(computeTrainingAdjustment(sessions, GOAL_PACE).paceAdjustmentPct).toBe(0)
+  })
+})
+
+describe('buildTrainingPlan dynamic adjustment', () => {
+  test('with no recentSessions, behaves exactly like the old static plan (no adjustment)', () => {
+    const plan = buildTrainingPlan(baseProfile())
+    expect(plan.adjustment).toEqual({ mileageMultiplier: 1, paceAdjustmentPct: 0, skipRate: 0, sessionsConsidered: 0 })
+  })
+
+  test('a heavily-skipped recent stretch produces a smaller long run than the same plan with good compliance', () => {
+    const skippedHistory = Array.from({ length: 4 }, () => ({ sessionStatus: 'skipped' }))
+    const compliantHistory = Array.from({ length: 4 }, () => ({ sessionStatus: 'done' }))
+
+    const skippedPlan = buildTrainingPlan(baseProfile(), skippedHistory)
+    const compliantPlan = buildTrainingPlan(baseProfile(), compliantHistory)
+
+    expect(skippedPlan.targetLongRun).toBeLessThan(compliantPlan.targetLongRun)
+    expect(skippedPlan.adjustment.mileageMultiplier).toBeLessThan(1)
+    expect(compliantPlan.adjustment.mileageMultiplier).toBe(1)
+  })
+
+  test('consistently fast logged runs produce a faster stretch goal than the unadjusted plan', () => {
+    const unadjusted = buildTrainingPlan(baseProfile())
+    const goalPace = unadjusted.goal.stretch.minutes / HALF_MILES
+
+    const fastHistory = [
+      { sessionStatus: 'done', actualPaceMinPerMile: goalPace * 0.9 },
+      { sessionStatus: 'done', actualPaceMinPerMile: goalPace * 0.92 },
+    ]
+    const adjustedPlan = buildTrainingPlan(baseProfile(), fastHistory)
+
+    expect(adjustedPlan.goal.stretch.minutes).toBeLessThan(unadjusted.goal.stretch.minutes)
   })
 })
 

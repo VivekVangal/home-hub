@@ -19,6 +19,25 @@ import TrainingPlanForm from '../components/TrainingPlanForm.jsx'
 
 const PHASE_LABEL = { base: 'Base building', build: 'Build', taper: 'Taper' }
 
+// Turns a lib/trainingPlan.js `adjustment` object into a plain-English note
+// for whoever just regenerated their plan — so the dynamic adjustment isn't
+// a silent black box. Returns null when there's nothing worth mentioning
+// (no logged history yet, or logged history that didn't trigger either
+// adjustment). Pure/exported so this is testable without rendering the page.
+export function describeAdjustment({ mileageMultiplier, paceAdjustmentPct, sessionsConsidered } = {}) {
+  if (!sessionsConsidered || (mileageMultiplier === 1 && paceAdjustmentPct === 0)) return null
+  const parts = []
+  if (mileageMultiplier < 1) {
+    parts.push(`slowed the mileage ramp ${Math.round((1 - mileageMultiplier) * 100)}% since some recent sessions were skipped`)
+  }
+  if (paceAdjustmentPct < 0) {
+    parts.push("nudged your stretch goal a little faster — you've been beating it")
+  } else if (paceAdjustmentPct > 0) {
+    parts.push('nudged your stretch goal a little slower — recent runs were well off it')
+  }
+  return `Adjusted based on your last 3 weeks: ${parts.join('; ')}.`
+}
+
 function SessionRow({ session, onSetStatus }) {
   const status = session.sessionStatus
   const stravaSummary = formatStravaSummary(session)
@@ -122,6 +141,7 @@ export default function TrainingPage() {
   const { data: allTasks, loading: tasksLoading } = useLiveData(getTasks, [])
   const [editing, setEditing] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [adjustmentNote, setAdjustmentNote] = useState(null)
   const [showDoneTasks, setShowDoneTasks] = useState(false)
   const [connectingStrava, setConnectingStrava] = useState(false)
   const [syncingStrava, setSyncingStrava] = useState(false)
@@ -177,14 +197,24 @@ export default function TrainingPage() {
   const sessionWindowStart = addDaysISO(today, -6)
   const sessions = trainingEvents.filter((e) => e.date >= sessionWindowStart).slice(0, 12)
 
+  // Last 3 weeks of already-logged sessions, fed into buildTrainingPlan so
+  // regenerating reacts to how training actually went (skipped sessions
+  // slow the ramp, consistently-fast logged runs nudge the goal faster) —
+  // see lib/trainingPlan.js's computeTrainingAdjustment. Empty on someone's
+  // very first plan (no history yet), which is exactly the old, unadjusted
+  // behavior.
+  const recentWindowStart = addDaysISO(today, -21)
+  const recentLoggedSessions = trainingEvents.filter((e) => e.date >= recentWindowStart && e.date < today)
+
   const generateFromProfile = async (submittedProfile) => {
     setGenerating(true)
     try {
       await saveTrainingProfile(user.uid, submittedProfile)
       if (hasPlan) await deleteUpcomingTrainingPlan(today)
-      const plan = buildTrainingPlan({ ...submittedProfile, startISO: nextMondayISO(today) })
+      const plan = buildTrainingPlan({ ...submittedProfile, startISO: nextMondayISO(today) }, recentLoggedSessions)
       const toAdd = trainingPlanToEvents(plan, user.uid).filter((e) => e.date >= today)
       await addTrainingPlan(toAdd)
+      setAdjustmentNote(describeAdjustment(plan.adjustment))
       setEditing(false)
     } finally {
       setGenerating(false)
@@ -302,6 +332,11 @@ export default function TrainingPage() {
             {hasPlan && (
               <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
                 Regenerating replaces upcoming sessions only — anything before today stays as your log. Only you can see these sessions.
+              </p>
+            )}
+            {adjustmentNote && (
+              <p style={{ color: 'var(--accent)', fontSize: '0.78rem', marginTop: 8, marginBottom: 0 }}>
+                {adjustmentNote}
               </p>
             )}
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>

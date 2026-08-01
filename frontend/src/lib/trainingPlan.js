@@ -166,6 +166,58 @@ export function analyzeGoal({
 }
 
 // ---------------------------------------------------------------------------
+// Dynamic adjustment — instead of a static pre-generated schedule that never
+// reacts to how training is actually going, "Regenerate remaining plan"
+// (see TrainingPage.jsx) passes in the last few weeks of logged sessions so
+// upcoming weeks can nudge based on real compliance and performance:
+//   - Skipping a third or more of recent sessions slows the mileage ramp
+//     rather than blindly climbing regardless of what actually happened.
+//     This only ever slows the ramp, never speeds it up — consistency is
+//     what should be rewarded, not pushing someone to do even more.
+//   - Running logged sessions consistently at or faster than the stretch
+//     goal's pace nudges that goal a little faster (it was too conservative);
+//     consistently much slower nudges it a little slower. Capped at 3%
+//     either way — this nudges analyzeGoal's result, it doesn't replace it.
+// Pure and testable with a fixed list of fake sessions — no "current date"
+// or Firestore dependency here, same as the rest of this module.
+// ---------------------------------------------------------------------------
+
+const SKIP_RATE_SLOWDOWN_THRESHOLDS = [
+  { min: 0.5, multiplier: 0.75 },
+  { min: 1 / 3, multiplier: 0.9 },
+]
+const PACE_ADJUSTMENT_PCT = 0.03
+const FASTER_THAN_GOAL_RATIO = 0.97 // avg actual pace <= 97% of goal pace -> running faster than the goal
+const MUCH_SLOWER_THAN_GOAL_RATIO = 1.25 // avg actual pace >= 125% of goal pace -> struggling to hold it
+
+// `recentSessions` should be trainingPlan events from roughly the last 2-3
+// weeks that have already happened (done or skipped) — future/unscheduled
+// sessions don't carry a sessionStatus and are ignored here even if passed
+// in by mistake. `goalStretchPaceMinPerMile` is the current stretch goal's
+// pace, in minutes per mile, for comparison against actual logged paces.
+export function computeTrainingAdjustment(recentSessions, goalStretchPaceMinPerMile) {
+  const logged = (recentSessions || []).filter((s) => s.sessionStatus === 'done' || s.sessionStatus === 'skipped')
+  if (logged.length === 0) {
+    return { mileageMultiplier: 1, paceAdjustmentPct: 0, skipRate: 0, sessionsConsidered: 0 }
+  }
+
+  const skipRate = logged.filter((s) => s.sessionStatus === 'skipped').length / logged.length
+  const threshold = SKIP_RATE_SLOWDOWN_THRESHOLDS.find((t) => skipRate > t.min)
+  const mileageMultiplier = threshold ? threshold.multiplier : 1
+
+  const withPace = logged.filter((s) => s.sessionStatus === 'done' && s.actualPaceMinPerMile != null)
+  let paceAdjustmentPct = 0
+  if (withPace.length >= 2 && goalStretchPaceMinPerMile) {
+    const avgPace = withPace.reduce((sum, s) => sum + s.actualPaceMinPerMile, 0) / withPace.length
+    const ratio = avgPace / goalStretchPaceMinPerMile
+    if (ratio <= FASTER_THAN_GOAL_RATIO) paceAdjustmentPct = -PACE_ADJUSTMENT_PCT
+    else if (ratio >= MUCH_SLOWER_THAN_GOAL_RATIO) paceAdjustmentPct = PACE_ADJUSTMENT_PCT
+  }
+
+  return { mileageMultiplier, paceAdjustmentPct, skipRate, sessionsConsidered: logged.length }
+}
+
+// ---------------------------------------------------------------------------
 // Long-run progression — target peak long run scales with race distance:
 // shorter races (5k/10k) benefit from a long run noticeably longer than the
 // race itself (aerobic base); half/full marathon long runs cap well under
@@ -193,11 +245,11 @@ function offsetKind(days, offset) {
   return 'rest'
 }
 
-function easyMilesForWeek(weekIndex, phases) {
+function easyMilesForWeek(weekIndex, phases, mileageMultiplier = 1) {
   // Easy-run mileage ramps gently alongside the long run, capped modestly.
   const phase = phaseForWeek(weekIndex, phases)
-  if (phase === 'taper') return 3
-  return phase === 'base' ? 3 : 4
+  const base = phase === 'taper' ? 3 : phase === 'base' ? 3 : 4
+  return Math.max(2, Math.round(base * mileageMultiplier))
 }
 
 function longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLongRun) {
@@ -215,7 +267,7 @@ function longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLon
   return Math.round(lerp(Math.max(buildPeak * 0.7, 4), 2, taper <= 1 ? 1 : i / (taper - 1)))
 }
 
-function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, targetLongRun, equipment }) {
+function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, targetLongRun, equipment, mileageMultiplier }) {
   const phase = phaseForWeek(weekIndex, phases)
   switch (kind) {
     case 'rest':
@@ -227,7 +279,10 @@ function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, 
       }
     case 'quality':
       if (phase === 'base') {
-        return { title: 'Easy run + strides', notes: `${easyMilesForWeek(weekIndex, phases)} mi easy with 4-6 short strides at the end.` }
+        return {
+          title: 'Easy run + strides',
+          notes: `${easyMilesForWeek(weekIndex, phases, mileageMultiplier)} mi easy with 4-6 short strides at the end.`,
+        }
       }
       return {
         title: 'Quality: tempo/intervals',
@@ -240,11 +295,11 @@ function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, 
       }
     case 'easy':
     default:
-      return { title: 'Easy run', notes: `${easyMilesForWeek(weekIndex, phases)} mi, conversational pace.` }
+      return { title: 'Easy run', notes: `${easyMilesForWeek(weekIndex, phases, mileageMultiplier)} mi, conversational pace.` }
   }
 }
 
-function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, targetLongRun) {
+function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, targetLongRun, mileageMultiplier = 1) {
   const phase = phaseForWeek(weekIndex, phases)
   const days = profile.days || DEFAULT_PROFILE.days
 
@@ -270,6 +325,7 @@ function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, t
       longestRecentRunMiles: profile.longestRecentRunMiles,
       targetLongRun,
       equipment: profile.equipment,
+      mileageMultiplier,
     })
     sessions.push({
       date: addDaysISO(weekStart, offset),
@@ -308,11 +364,34 @@ export function buildDaysMapping(longDay, qualityDay, strengthDay) {
 // nextMondayISO(todayISO()) from the caller (TrainingPage.jsx), since this
 // module has no notion of "today" itself (keeps it a pure function, easy to
 // test with fixed dates).
-export function buildTrainingPlan(profile) {
+//
+// `recentSessions` (optional, defaults to none) feeds computeTrainingAdjustment
+// above — pass the last few weeks of already-logged sessions when
+// regenerating an existing plan so upcoming weeks react to how training
+// actually went, rather than always producing the same static ramp a fresh
+// profile would. Omitting it (e.g. the very first time someone generates a
+// plan, with no history yet) is identical to the old, non-dynamic behavior.
+export function buildTrainingPlan(profile, recentSessions = []) {
   const { startISO } = profile
   const phases = computePhases(startISO, profile.raceDateISO)
   const goal = analyzeGoal({ ...profile, weeksAvailable: phases.totalWeeks })
-  const targetLongRun = longRunTarget(profile.raceDistanceMiles, profile.longestRecentRunMiles)
+
+  const goalStretchPaceMinPerMile = goal.stretch.minutes / profile.raceDistanceMiles
+  const adjustment = computeTrainingAdjustment(recentSessions, goalStretchPaceMinPerMile)
+
+  const adjustedGoal = adjustment.paceAdjustmentPct === 0 ? goal : (() => {
+    const stretchMinutes = goal.stretch.minutes * (1 + adjustment.paceAdjustmentPct)
+    return {
+      ...goal,
+      stretch: {
+        minutes: stretchMinutes,
+        time: fmtMinutesAsTime(stretchMinutes),
+        pace: fmtPace(stretchMinutes, profile.raceDistanceMiles),
+      },
+    }
+  })()
+
+  const targetLongRun = longRunTarget(profile.raceDistanceMiles, profile.longestRecentRunMiles) * adjustment.mileageMultiplier
 
   const weeks = []
   for (let i = 0; i < phases.totalWeeks; i++) {
@@ -320,10 +399,12 @@ export function buildTrainingPlan(profile) {
     weeks.push({
       weekNumber: i + 1,
       phase: phaseForWeek(i, phases),
-      sessions: weekSessions(weekStart, i, phases, i === phases.totalWeeks - 1, profile, goal, targetLongRun),
+      sessions: weekSessions(
+        weekStart, i, phases, i === phases.totalWeeks - 1, profile, adjustedGoal, targetLongRun, adjustment.mileageMultiplier
+      ),
     })
   }
-  return { startISO, profile, phases, goal, targetLongRun, weeks }
+  return { startISO, profile, phases, goal: adjustedGoal, targetLongRun, adjustment, weeks }
 }
 
 // Flattens a plan into Home Hub event-shaped objects, ready for addEvent()/
