@@ -42,17 +42,40 @@ export function describeAdjustment({ mileageMultiplier, paceAdjustmentPct, sessi
 }
 
 // Clickable chips for a session's specific strength/stretch exercises (see
-// lib/exercises.js) — each links out to a real demonstration (a YouTube
+// lib/exercises.js). Most link out to a real demonstration (a YouTube
 // search, not an embedded/hotlinked gif — see that file's header comment
-// for why) rather than just leaving the exercise name as plain text in the
-// notes with nothing to click through to.
+// for why) rather than leaving the exercise name as plain text with
+// nothing to click through to. A few carry a real, individually-verified,
+// properly-licensed illustration instead — those render as a small
+// thumbnail with visible attribution (CC-BY-SA requires it), linking to
+// the Commons source page rather than a YouTube search.
 function ExerciseChips({ ids }) {
   if (!ids || ids.length === 0) return null
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
       {ids.map((id) => {
         const ex = exerciseById(id)
         if (!ex) return null
+        if (ex.illustration) {
+          return (
+            <a
+              key={id}
+              href={ex.illustration.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="exercise-chip exercise-chip-illustrated"
+              title={`${ex.instructions} — ${ex.reps}`}
+            >
+              <img src={ex.illustration.url} alt={ex.name} loading="lazy" />
+              <span>
+                {ex.name}
+                <span className="exercise-credit">
+                  {ex.illustration.credit} · {ex.illustration.license}
+                </span>
+              </span>
+            </a>
+          )
+        }
         return (
           <a
             key={id}

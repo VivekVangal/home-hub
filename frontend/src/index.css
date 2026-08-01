@@ -247,6 +247,35 @@ body {
   text-decoration: underline;
 }
 
+.exercise-chip-illustrated {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+}
+
+.exercise-chip-illustrated img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.exercise-chip-illustrated span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.exercise-credit {
+  font-size: 0.62rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -15,6 +15,30 @@ describe('exercise data', () => {
   })
 })
 
+describe('illustrations', () => {
+  const all = [...STRENGTH_EXERCISES, ...STRETCH_EXERCISES]
+  const illustrated = all.filter((e) => e.illustration)
+
+  test('at least one exercise has a real illustration', () => {
+    expect(illustrated.length).toBeGreaterThan(0)
+  })
+
+  test('every illustration is hotlinked directly from Wikimedia (not a third-party mirror), and carries attribution', () => {
+    illustrated.forEach((e) => {
+      expect(e.illustration.url).toMatch(/^https:\/\/upload\.wikimedia\.org\/wikipedia\/commons\//)
+      expect(e.illustration.credit).toBeTruthy()
+      expect(e.illustration.license).toBeTruthy()
+      expect(e.illustration.sourceUrl).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/)
+    })
+  })
+
+  test('exercises without a verified illustration have illustration: null, not left undefined', () => {
+    all.filter((e) => !e.illustration).forEach((e) => {
+      expect(e.illustration).toBeNull()
+    })
+  })
+})
+
 describe('pickWeeklyExercises', () => {
   test('returns the requested count of strength and stretch exercises', () => {
     const { strength, stretch } = pickWeeklyExercises(0)
