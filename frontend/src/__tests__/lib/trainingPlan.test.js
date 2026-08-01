@@ -9,6 +9,10 @@ import {
   longRunTarget,
   buildDaysMapping,
   computeTrainingAdjustment,
+  computeVdot,
+  vdotZonePace,
+  vdotTrainingPaces,
+  DISTANCES,
 } from '../../lib/trainingPlan.js'
 
 // Fixed dates so these tests don't depend on "today": 2026-08-03 is a
@@ -123,6 +127,54 @@ describe('analyzeGoal', () => {
   })
 })
 
+describe('computeVdot', () => {
+  test('matches the well-known reference point: a 20:00 5k is approximately VDOT 50', () => {
+    // Published Daniels VDOT tables list VDOT 50 as almost exactly a 19:57
+    // 5k, so 20:00 should land just a hair under 50.
+    expect(computeVdot(DISTANCES['5k'], 20)).toBeCloseTo(50, 0)
+  })
+
+  test('a faster time at the same distance produces a higher VDOT', () => {
+    const slower = computeVdot(DISTANCES['5k'], 22)
+    const faster = computeVdot(DISTANCES['5k'], 18)
+    expect(faster).toBeGreaterThan(slower)
+  })
+})
+
+describe('vdotZonePace', () => {
+  const vdot = computeVdot(DISTANCES['5k'], 20) // ~50
+
+  test('orders zone paces from slowest to fastest: easy > marathon > threshold > interval > repetition', () => {
+    const easy = vdotZonePace(vdot, 'easy')
+    const marathon = vdotZonePace(vdot, 'marathon')
+    const threshold = vdotZonePace(vdot, 'threshold')
+    const interval = vdotZonePace(vdot, 'interval')
+    const repetition = vdotZonePace(vdot, 'repetition')
+    // Paces are minutes/mile, so "faster" means a smaller number.
+    expect(easy).toBeGreaterThan(marathon)
+    expect(marathon).toBeGreaterThan(threshold)
+    expect(threshold).toBeGreaterThan(interval)
+    expect(interval).toBeGreaterThan(repetition)
+  })
+
+  test('a higher VDOT produces faster paces in the same zone', () => {
+    const fitter = computeVdot(DISTANCES['5k'], 16)
+    expect(vdotZonePace(fitter, 'threshold')).toBeLessThan(vdotZonePace(vdot, 'threshold'))
+  })
+})
+
+describe('vdotTrainingPaces', () => {
+  test('returns the vdot score plus all five zone paces, formatted', () => {
+    const result = vdotTrainingPaces(DISTANCES['5k'], 20)
+    expect(result.vdot).toBeCloseTo(50, 0)
+    expect(Object.keys(result.paces).sort()).toEqual(['easy', 'interval', 'marathon', 'repetition', 'threshold'])
+    Object.values(result.paces).forEach((p) => {
+      expect(p.minPerMile).toBeGreaterThan(0)
+      expect(p.pace).toMatch(/^\d+:\d{2}\/mi$/)
+    })
+  })
+})
+
 describe('longRunTarget', () => {
   test('half marathon: caps well under full race distance', () => {
     const target = longRunTarget(HALF_MILES, 3)
@@ -186,6 +238,35 @@ describe('buildTrainingPlan', () => {
 
   test('respects a custom day assignment (strength on the configured day)', () => {
     expect(plan.weeks[0].sessions[2].title).toBe('Strength + stretch') // Wednesday, per DAYS
+  })
+
+  test('exposes the VDOT-derived paces at the plan level when a recent race is given', () => {
+    expect(plan.vdot).not.toBeNull()
+    expect(plan.vdot.paces.threshold.pace).toMatch(/^\d+:\d{2}\/mi$/)
+  })
+
+  test('build-phase quality sessions cite threshold/interval pace instead of the blended stretch pace', () => {
+    const buildWeekQuality = plan.weeks[4].sessions[3]
+    expect(buildWeekQuality.notes).toContain(`threshold pace (${plan.vdot.paces.threshold.pace})`)
+    expect(buildWeekQuality.notes).toContain(`interval pace (${plan.vdot.paces.interval.pace})`)
+    expect(buildWeekQuality.notes).not.toContain('stretch pace')
+  })
+
+  test('easy and long run sessions cite the VDOT easy pace', () => {
+    const baseWeekEasyPlusStrides = plan.weeks[0].sessions[3] // Thursday, base phase
+    const longRun = plan.weeks[0].sessions[6] // Sunday, per DAYS
+    expect(baseWeekEasyPlusStrides.notes).toContain(`aim slower than ${plan.vdot.paces.easy.pace}`)
+    expect(longRun.notes).toContain(`aim slower than ${plan.vdot.paces.easy.pace}`)
+  })
+
+  test('falls back to the old stretch-pace/generic wording with no recent race result', () => {
+    const noRacePlan = buildTrainingPlan(baseProfile({ recentRaceDistanceMiles: null, recentRaceTimeMinutes: null }))
+    expect(noRacePlan.vdot).toBeNull()
+    const buildWeekQuality = noRacePlan.weeks[4].sessions[3]
+    expect(buildWeekQuality.notes).toContain(`quality miles at stretch pace (${noRacePlan.goal.stretch.pace})`)
+    const longRun = noRacePlan.weeks[0].sessions[6]
+    expect(longRun.notes).toContain('easy pace — slower than race pace on purpose')
+    expect(longRun.notes).not.toContain('aim slower than')
   })
 })
 

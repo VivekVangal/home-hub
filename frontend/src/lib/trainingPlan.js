@@ -218,6 +218,77 @@ export function computeTrainingAdjustment(recentSessions, goalStretchPaceMinPerM
 }
 
 // ---------------------------------------------------------------------------
+// VDOT (Jack Daniels' "Running Formula") — an upgrade over Riegel above for
+// prescribing training paces specifically (Riegel stays in analyzeGoal for
+// predicting race-day finish time, a different question VDOT isn't really
+// meant to answer better). Where Riegel only predicts one equivalent time at
+// another distance, VDOT derives a single fitness score from one race result
+// and produces distinct paces per training zone — easy/marathon/threshold/
+// interval/repetition — instead of one blended "stretch pace" repeated
+// everywhere. These are Daniels & Gilbert's original published regression
+// equations (not an interpolated table), so results are exact and testable:
+//   %VO2max(t) = 0.8 + 0.1894393*e^(-0.012778t) + 0.2989558*e^(-0.1932605t)
+//   VO2(v)     = -4.60 + 0.182258v + 0.000104v^2      (v in meters/minute)
+//   VDOT       = VO2(v) / %VO2max(t)
+// Zone intensities (% of VDOT) use the midpoint of Daniels' own published
+// ranges (Easy 59-75%, Marathon 75-84%, Threshold 85-88%, Interval 95-100%,
+// Repetition 105-120%) — a starting point to train around, not an exact
+// per-runner prescription, same spirit as the mileage-estimate fallback in
+// analyzeGoal above.
+// ---------------------------------------------------------------------------
+
+const VDOT_ZONE_INTENSITY = { easy: 0.65, marathon: 0.80, threshold: 0.87, interval: 1.00, repetition: 1.10 }
+const METERS_PER_MILE = 1609.34
+
+function percentVo2Max(timeMinutes) {
+  return 0.8 + 0.1894393 * Math.exp(-0.012778 * timeMinutes) + 0.2989558 * Math.exp(-0.1932605 * timeMinutes)
+}
+
+function vo2Cost(velocityMetersPerMin) {
+  return -4.6 + 0.182258 * velocityMetersPerMin + 0.000104 * velocityMetersPerMin * velocityMetersPerMin
+}
+
+// Inverts vo2Cost — the velocity (meters/min) whose oxygen cost is
+// `targetVo2` — by solving 0.000104v^2 + 0.182258v - (4.6 + targetVo2) = 0
+// for its positive root (the other root is negative and unphysical).
+function velocityForVo2(targetVo2) {
+  const a = 0.000104
+  const b = 0.182258
+  const c = -(4.6 + targetVo2)
+  return (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a)
+}
+
+// A VDOT score from one race result — higher is fitter, independent of
+// which distance/time produced it (a 20:00 5k and a ~1:33 half marathon
+// both land around VDOT 50, per Daniels' published tables).
+export function computeVdot(distanceMiles, timeMinutes) {
+  const velocityMetersPerMin = (distanceMiles * METERS_PER_MILE) / timeMinutes
+  return vo2Cost(velocityMetersPerMin) / percentVo2Max(timeMinutes)
+}
+
+// One training zone's pace (minutes/mile) for a given VDOT score.
+// `zone` is one of 'easy' | 'marathon' | 'threshold' | 'interval' | 'repetition'.
+export function vdotZonePace(vdot, zone) {
+  const targetVo2 = vdot * VDOT_ZONE_INTENSITY[zone]
+  const velocityMetersPerMin = velocityForVo2(targetVo2)
+  return METERS_PER_MILE / velocityMetersPerMin
+}
+
+// All five zone paces at once, from a single race result — this is what
+// buildTrainingPlan below actually calls when a recent race is on the
+// profile (VDOT needs a real result to derive from, same requirement as
+// Riegel; there's no VDOT equivalent of the mileage-estimate fallback).
+export function vdotTrainingPaces(distanceMiles, timeMinutes) {
+  const vdot = computeVdot(distanceMiles, timeMinutes)
+  const paces = {}
+  for (const zone of Object.keys(VDOT_ZONE_INTENSITY)) {
+    const minPerMile = vdotZonePace(vdot, zone)
+    paces[zone] = { minPerMile, pace: fmtPace(minPerMile, 1) }
+  }
+  return { vdot, paces }
+}
+
+// ---------------------------------------------------------------------------
 // Long-run progression — target peak long run scales with race distance:
 // shorter races (5k/10k) benefit from a long run noticeably longer than the
 // race itself (aerobic base); half/full marathon long runs cap well under
@@ -267,7 +338,7 @@ function longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLon
   return Math.round(lerp(Math.max(buildPeak * 0.7, 4), 2, taper <= 1 ? 1 : i / (taper - 1)))
 }
 
-function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, targetLongRun, equipment, mileageMultiplier }) {
+function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, targetLongRun, equipment, mileageMultiplier, vdot }) {
   const phase = phaseForWeek(weekIndex, phases)
   switch (kind) {
     case 'rest':
@@ -277,29 +348,35 @@ function sessionForKind(kind, { weekIndex, phases, goal, longestRecentRunMiles, 
         title: 'Strength + stretch',
         notes: `Lower body + core, 30-40 min (${equipment || 'bodyweight'}), plus 10 min stretch.`,
       }
-    case 'quality':
+    case 'quality': {
+      const miles = easyMilesForWeek(weekIndex, phases, mileageMultiplier)
       if (phase === 'base') {
-        return {
-          title: 'Easy run + strides',
-          notes: `${easyMilesForWeek(weekIndex, phases, mileageMultiplier)} mi easy with 4-6 short strides at the end.`,
-        }
+        const paceNote = vdot ? ` (aim slower than ${vdot.paces.easy.pace})` : ''
+        return { title: 'Easy run + strides', notes: `${miles} mi easy${paceNote} with 4-6 short strides at the end.` }
       }
+      const qualityPaceNote = vdot
+        ? `threshold pace (${vdot.paces.threshold.pace}) for tempo portions, interval pace (${vdot.paces.interval.pace}) for repeats`
+        : `quality miles at stretch pace (${goal.stretch.pace})`
       return {
         title: 'Quality: tempo/intervals',
-        notes: `3-5 mi total incl. warm-up/cooldown, quality miles at stretch pace (${goal.stretch.pace}).`,
+        notes: `3-5 mi total incl. warm-up/cooldown, ${qualityPaceNote}.`,
       }
-    case 'long':
-      return {
-        title: 'Long run',
-        notes: `${longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLongRun)} mi, easy pace — slower than race pace on purpose.`,
-      }
+    }
+    case 'long': {
+      const miles = longRunMilesForWeek(weekIndex, phases, longestRecentRunMiles, targetLongRun)
+      const paceNote = vdot ? ` (aim slower than ${vdot.paces.easy.pace})` : ''
+      return { title: 'Long run', notes: `${miles} mi, easy pace${paceNote} — slower than race pace on purpose.` }
+    }
     case 'easy':
-    default:
-      return { title: 'Easy run', notes: `${easyMilesForWeek(weekIndex, phases, mileageMultiplier)} mi, conversational pace.` }
+    default: {
+      const miles = easyMilesForWeek(weekIndex, phases, mileageMultiplier)
+      const paceNote = vdot ? ` (aim slower than ${vdot.paces.easy.pace})` : ''
+      return { title: 'Easy run', notes: `${miles} mi, conversational pace${paceNote}.` }
+    }
   }
 }
 
-function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, targetLongRun, mileageMultiplier = 1) {
+function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, targetLongRun, mileageMultiplier = 1, vdot = null) {
   const phase = phaseForWeek(weekIndex, phases)
   const days = profile.days || DEFAULT_PROFILE.days
 
@@ -326,6 +403,7 @@ function weekSessions(weekStart, weekIndex, phases, isLastWeek, profile, goal, t
       targetLongRun,
       equipment: profile.equipment,
       mileageMultiplier,
+      vdot,
     })
     sessions.push({
       date: addDaysISO(weekStart, offset),
@@ -393,6 +471,13 @@ export function buildTrainingPlan(profile, recentSessions = []) {
 
   const targetLongRun = longRunTarget(profile.raceDistanceMiles, profile.longestRecentRunMiles) * adjustment.mileageMultiplier
 
+  // VDOT needs a real race result to derive from, same requirement as
+  // Riegel's baseline above — with no recent race, sessions fall back to
+  // the existing stretch-pace/generic wording (see sessionForKind).
+  const vdot = profile.recentRaceDistanceMiles && profile.recentRaceTimeMinutes
+    ? vdotTrainingPaces(profile.recentRaceDistanceMiles, profile.recentRaceTimeMinutes)
+    : null
+
   const weeks = []
   for (let i = 0; i < phases.totalWeeks; i++) {
     const weekStart = toISODate(addWeeks(parseISO(startISO), i))
@@ -400,11 +485,11 @@ export function buildTrainingPlan(profile, recentSessions = []) {
       weekNumber: i + 1,
       phase: phaseForWeek(i, phases),
       sessions: weekSessions(
-        weekStart, i, phases, i === phases.totalWeeks - 1, profile, adjustedGoal, targetLongRun, adjustment.mileageMultiplier
+        weekStart, i, phases, i === phases.totalWeeks - 1, profile, adjustedGoal, targetLongRun, adjustment.mileageMultiplier, vdot
       ),
     })
   }
-  return { startISO, profile, phases, goal: adjustedGoal, targetLongRun, adjustment, weeks }
+  return { startISO, profile, phases, goal: adjustedGoal, targetLongRun, adjustment, vdot, weeks }
 }
 
 // Flattens a plan into Home Hub event-shaped objects, ready for addEvent()/
