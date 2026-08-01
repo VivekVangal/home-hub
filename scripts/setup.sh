@@ -20,6 +20,14 @@
 #
 # Override any default by exporting it first, e.g.:
 #   FIREBASE_PROJECT_ID=my-own-id ./scripts/setup.sh
+#
+# The step 3 logic (ensure_firebase_project) is pulled out into its own
+# function so scripts/setup.test.sh can source this file and exercise it
+# directly, with a stubbed `firebase` command, instead of needing a real
+# Firebase account to test against. Sourcing this file only defines
+# functions/variables — nothing runs until main() is called, which only
+# happens automatically when this file is executed directly (see the guard
+# at the bottom).
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
@@ -34,6 +42,41 @@ bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 warn() { printf '  ⚠️  %s\n' "$1"; }
 ok()   { printf '  ✓ %s\n' "$1"; }
 
+# Creates the Firebase project if it doesn't already exist. Treats
+# "already exists" as a successful, idempotent no-op rather than a hard
+# failure — `firebase projects:list` can lag behind reality (propagation
+# delay, or limited IAM visibility into who else's projects exist), so
+# relying on it alone to detect an existing project isn't reliable enough to
+# justify aborting the whole script when `projects:create` fails only
+# because the project is already there. Any other kind of failure still
+# just warns and lets the rest of the script run, same as every other
+# soft-failing step here (e.g. step 4's Firestore creation) — a missing
+# project surfaces its own clear errors in later steps rather than needing
+# this one to guess right about every possible failure mode.
+ensure_firebase_project() {
+  local project_id="$1"
+  local display_name="$2"
+
+  if firebase projects:list 2>/dev/null | grep -q "$project_id"; then
+    ok "Project $project_id already exists — skipping creation."
+    return 0
+  fi
+
+  local output status
+  output="$(firebase projects:create "$project_id" --display-name "$display_name" 2>&1)"
+  status=$?
+  echo "$output"
+
+  if [ "$status" -eq 0 ]; then
+    ok "Created project $project_id"
+  elif echo "$output" | grep -qi "already exists"; then
+    ok "Project $project_id already exists (projects:list just didn't show it) — continuing."
+  else
+    warn "Couldn't create that project id (maybe already taken globally). Create one manually at https://console.firebase.google.com, then re-run with FIREBASE_PROJECT_ID=<your-id> ./scripts/setup.sh"
+  fi
+}
+
+main() {
 # --- 0. Sanity checks -------------------------------------------------------
 bold "0. Checking required tools"
 for cmd in git node npm; do
@@ -99,13 +142,7 @@ firebase login || { warn "Firebase login failed/cancelled — re-run this script
 
 # --- 3. Create the Firebase project ------------------------------------------
 bold "3. Firebase project: $FIREBASE_PROJECT_ID"
-if firebase projects:list 2>/dev/null | grep -q "$FIREBASE_PROJECT_ID"; then
-  ok "Project $FIREBASE_PROJECT_ID already exists — skipping creation."
-else
-  firebase projects:create "$FIREBASE_PROJECT_ID" --display-name "$FIREBASE_DISPLAY_NAME" \
-    && ok "Created project $FIREBASE_PROJECT_ID" \
-    || { warn "Couldn't create that project id (maybe already taken globally). Create one manually at https://console.firebase.google.com, then re-run with FIREBASE_PROJECT_ID=<your-id> ./scripts/setup.sh"; exit 1; }
-fi
+ensure_firebase_project "$FIREBASE_PROJECT_ID" "$FIREBASE_DISPLAY_NAME"
 
 # --- 4. Create the Firestore database ----------------------------------------
 bold "4. Firestore database"
@@ -181,3 +218,12 @@ fi
 bold "Done"
 echo "Push to main (already done above if the repo was just created) to trigger the first deploy."
 echo "Your app will be live at: https://$FIREBASE_PROJECT_ID.web.app"
+}
+
+# Only run main() when this file is executed directly (./scripts/setup.sh or
+# bash scripts/setup.sh) — not when it's sourced (e.g. by setup.test.sh,
+# which sources this file just to get ensure_firebase_project and friends
+# without running the whole interactive setup).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

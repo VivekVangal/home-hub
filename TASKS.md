@@ -6,7 +6,6 @@ Running list of known open items — not household tasks (those live in the app'
 
 - [ ] **Confirm CI is green end-to-end after the dev/prod split.** Push to `develop` and to `main` at least once and confirm both `deploy-dev.yml` and `deploy-prod.yml` complete successfully (install → test → build → hosting deploy → Firestore rules deploy).
 - [ ] **Run `scripts/setup-dev-env.sh` fully**, including generating the dev project's own service account and setting the `development` GitHub Environment secrets (`FIREBASE_SERVICE_ACCOUNT` + the 6 `VITE_FIREBASE_*` values) — confirm `home-hub-family-dev.web.app` loads and signs in correctly.
-- [ ] **`scripts/setup.sh` idempotency bug**: step 3 (Firebase project creation) `exit 1`s if the project already exists instead of soft-failing like the other steps. Low priority since setup is basically done, but worth a small fix so re-running the script doesn't hard-fail.
 - [ ] **Route/location suggestions for training** — still needs your general area (town/zip) to suggest real routes; not started.
 - [ ] **Make the training plan dynamic** — recalculate upcoming weeks based on runs actually logged (skipped/hard weeks slow the ramp, good weeks nudge back toward stretch pace), instead of a static pre-generated schedule.
 - [ ] **Verify the training-plan feature on the dev site** — form-driven generator (any race/distance/goal, not just Baystate), private per-person (own Firestore rule + hidden from others' Combined calendar view). Committed to `develop`, not yet pushed/tested live.
@@ -20,6 +19,7 @@ Running list of known open items — not household tasks (those live in the app'
 
 ## Recently resolved
 
+- [x] `scripts/setup.sh` step 3 idempotency bug — `ensure_firebase_project` now treats "already exists" as a successful no-op (instead of a hard `exit 1`) whether it's detected via `projects:list` or only surfaces when `projects:create` itself fails with that message. Covered by `scripts/setup.test.sh` (a plain-bash test with a stubbed `firebase` command — no test framework existed for shell scripts before this, only vitest for JS).
 - [x] ~~Terra integration~~ — **evaluated and removed.** Was briefly built as a unified aggregator (Garmin/Fitbit/Apple Health/Oura/etc. through one API) to work around Strava's 10-athlete cap, but its actual pricing turned out to start at $399-499/month with no free tier at all (just a 30-day refund window) — not viable for a household hobby project. Code (`functions/terra.js`, `lib/terra.js`, the Training page UI block) was fully deleted rather than left dead in the repo. Replaced by direct, free integrations for Apple Health and Garmin instead.
 - [x] Calendar Day view alongside the existing Week view (click a day header, or the Day/Week toggle, to switch)
 - [x] Dev/prod Firebase environment split (separate projects, separate CI pipelines, separate secrets)
